@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { TOTAL_QUESTIONS, TEST_DURATION_SECONDS, DEFAULT_LEVEL_PARAMS_INT, DEFAULT_LEVEL_PARAMS_FRAC } from './constants';
 import { Question, StudentData, TestAttempt, RationalNumber, AnsweredQuestion, User, AdminUser, TeacherUser, StudentUser, Class, Role } from './types';
-import { generateQuestion } from './services/questionService';
+import { generateTestQuestions } from './services/questionService';
 import { analyzeStudentHistory, analyzeClassTrends } from './services/geminiService';
 import * as api from './services/mockService'; // Use the new mock service
 import NumberPad from './components/NumberPad';
@@ -460,7 +459,8 @@ const StudentView: React.FC<{ currentUser: StudentUser }> = ({ currentUser }) =>
   const [lastAttempt, setLastAttempt] = useState<TestAttempt | null>(null);
   const [studentData, setStudentData] = useState<StudentData | null>(null);
   const [levelParams, setLevelParams] = useState<{levelParamsInt: number[][], levelParamsFrac: number[][] } | null>(null)
-  
+  const [isFullScreen, setIsFullScreen] = useState(!!document.fullscreenElement);
+
   useEffect(() => {
     Promise.all([
         api.getStudentProfile(currentUser.id),
@@ -469,6 +469,10 @@ const StudentView: React.FC<{ currentUser: StudentUser }> = ({ currentUser }) =>
         setStudentData(studentProfile);
         setLevelParams(levelParamsData);
     }).catch(error => console.error("Failed to load student data:", error));
+    
+    const onFullScreenChange = () => setIsFullScreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFullScreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullScreenChange);
   }, [currentUser.id]);
   
   const handleTestComplete = async (attempt: TestAttempt) => {
@@ -482,6 +486,14 @@ const StudentView: React.FC<{ currentUser: StudentUser }> = ({ currentUser }) =>
         // If the update fails, still show results but maybe with a warning
         setLastAttempt(attempt);
         setGameState('results');
+    }
+  };
+
+  const handleFullScreen = () => {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(console.error);
+    } else {
+        document.exitFullscreen();
     }
   };
   
@@ -521,12 +533,17 @@ const StudentView: React.FC<{ currentUser: StudentUser }> = ({ currentUser }) =>
               This is a timed test to help you practice your math skills. Try your best, and don't worry about mistakes! Your teacher will use the results to help you learn.
           </p>
           <p className="mb-6">You are starting at Level <span className="font-bold text-blue-500">1</span>.</p>
-          <button
-            onClick={() => setGameState('testing')}
-            className="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-10 rounded-lg text-2xl animate-pulse-start"
-          >
-            Start First Test
-          </button>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+             <button onClick={handleFullScreen} className="bg-slate-500 hover:bg-slate-600 text-white font-bold py-3 px-6 rounded-lg text-lg">
+                 {isFullScreen ? 'Exit Full Screen' : 'Enter Full Screen'}
+             </button>
+             <button
+                onClick={() => setGameState('testing')}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-10 rounded-lg text-2xl animate-pulse-start"
+              >
+                Start First Test
+              </button>
+          </div>
         </div>
     );
   }
@@ -535,12 +552,17 @@ const StudentView: React.FC<{ currentUser: StudentUser }> = ({ currentUser }) =>
     <div className="text-center">
       <h2 className="text-3xl font-bold mb-2">Welcome back, {currentUser.firstName}!</h2>
       <p className="text-xl mb-4">You are on Level <span className="font-bold text-blue-500">{studentData.currentLevel}</span></p>
-      <button
-        onClick={() => setGameState('testing')}
-        className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg text-xl transition-transform transform hover:scale-105"
-      >
-        Start Test
-      </button>
+       <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <button onClick={handleFullScreen} className="bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-5 rounded-lg text-md">
+                 {isFullScreen ? 'Exit Full Screen' : 'Enter Full Screen'}
+             </button>
+            <button
+              onClick={() => setGameState('testing')}
+              className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg text-xl transition-transform transform hover:scale-105"
+            >
+              Start Test
+            </button>
+       </div>
       <div className="mt-8">
         <h3 className="text-2xl font-semibold mb-4">Past Attempts</h3>
         <div className="max-h-60 overflow-y-auto bg-white dark:bg-slate-800 p-4 rounded-lg shadow-inner">
@@ -691,13 +713,18 @@ const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsI
   const [activeInput, setActiveInput] = useState<'int' | 'num' | 'den'>('int');
 
   const questionStartTimeRef = useRef<number>(Date.now());
-  const denRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const newQuestions = Array.from({ length: TOTAL_QUESTIONS }, () => generateQuestion(level, levelParamsInt, levelParamsFrac));
+    const newQuestions = generateTestQuestions(level, levelParamsInt, levelParamsFrac);
     setQuestions(newQuestions);
     setAnsweredQuestions([]);
     questionStartTimeRef.current = Date.now();
+
+    if (newQuestions[0]?.type === 'integer') {
+        setActiveInput('int');
+    } else {
+        setActiveInput('num');
+    }
   }, [level, levelParamsInt, levelParamsFrac]);
 
   useEffect(() => {
@@ -706,33 +733,7 @@ const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsI
     }
   }, [currentQuestionIndex, questions]);
 
-  const endTest = useCallback((finalAnswers: AnsweredQuestion[]) => {
-    const correctCount = finalAnswers.filter(r => r.isCorrect).length;
-
-    onComplete({
-        date: new Date().toISOString(),
-        level: level,
-        correctCount,
-        timeRemaining: timeLeft,
-        totalScore: (level - 1) * TOTAL_QUESTIONS + correctCount,
-        answeredQuestions: finalAnswers,
-    });
-  }, [onComplete, level, timeLeft]);
-
-
-  useEffect(() => {
-    const timerId = setTimeout(() => {
-        if (timeLeft <= 0) {
-            const finalAnswer = processAnswer(questions[currentQuestionIndex], intAnswer, numAnswer, denAnswer, questionStartTimeRef.current);
-            endTest([...answeredQuestions, finalAnswer]);
-        } else {
-            setTimeLeft(t => t - 1);
-        }
-    }, 1000);
-    return () => clearTimeout(timerId);
-  }, [timeLeft, endTest, questions, currentQuestionIndex, answeredQuestions, intAnswer, numAnswer, denAnswer]);
-  
-  const processAnswer = (
+  const processAnswer = useCallback((
     question: Question, 
     intAns: string, 
     numAns: string, 
@@ -760,10 +761,25 @@ const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsI
           operationType: question.operationType,
           operands: question.operands,
       };
-  };
+  }, []);
 
-  const handleNextQuestion = () => {
+  const endTest = useCallback((finalAnswers: AnsweredQuestion[]) => {
+    const correctCount = finalAnswers.filter(r => r.isCorrect).length;
+
+    onComplete({
+        date: new Date().toISOString(),
+        level: level,
+        correctCount,
+        timeRemaining: timeLeft,
+        totalScore: (level - 1) * TOTAL_QUESTIONS + correctCount,
+        answeredQuestions: finalAnswers,
+    });
+  }, [onComplete, level, timeLeft]);
+
+  const handleNextQuestion = useCallback(() => {
     const currentQuestion = questions[currentQuestionIndex];
+    if (!currentQuestion) return;
+
     const newAnswer = processAnswer(currentQuestion, intAnswer, numAnswer, denAnswer, questionStartTimeRef.current);
     const updatedAnswers = [...answeredQuestions, newAnswer];
     setAnsweredQuestions(updatedAnswers);
@@ -776,16 +792,17 @@ const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsI
     if (currentQuestionIndex >= TOTAL_QUESTIONS - 1) {
       endTest(updatedAnswers);
     } else {
+      const nextQuestion = questions[currentQuestionIndex + 1];
       setCurrentQuestionIndex(i => i + 1);
-      if (questions[currentQuestionIndex + 1]?.type === 'integer') {
+      if (nextQuestion?.type === 'integer') {
         setActiveInput('int');
       } else {
         setActiveInput('num');
       }
     }
-  };
+  }, [questions, currentQuestionIndex, intAnswer, numAnswer, denAnswer, answeredQuestions, endTest, processAnswer]);
   
-  const handleKeyPress = (key: string) => {
+  const handleKeyPress = useCallback((key: string) => {
     const updateState = (setter: React.Dispatch<React.SetStateAction<string>>) => {
         setter(prev => {
             if (key === 'Backspace') return prev.slice(0, -1);
@@ -798,68 +815,118 @@ const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsI
     if(activeInput === 'int') updateState(setIntAnswer);
     if(activeInput === 'num') updateState(setNumAnswer);
     if(activeInput === 'den') updateState(setDenAnswer);
-  };
+  }, [activeInput]);
+  
+  useEffect(() => {
+    const timerId = setTimeout(() => {
+        if (timeLeft <= 0) {
+            const finalAnswer = processAnswer(questions[currentQuestionIndex], intAnswer, numAnswer, denAnswer, questionStartTimeRef.current);
+            endTest([...answeredQuestions, finalAnswer]);
+        } else {
+            setTimeLeft(t => t - 1);
+        }
+    }, 1000);
+    return () => clearTimeout(timerId);
+  }, [timeLeft, endTest, questions, currentQuestionIndex, answeredQuestions, intAnswer, numAnswer, denAnswer, processAnswer]);
+  
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleNextQuestion();
+            return;
+        }
+
+        const currentQuestion = questions[currentQuestionIndex];
+        if (currentQuestion?.type === 'rational') {
+            if (e.key === 'ArrowDown' || e.key === 'Tab') {
+                e.preventDefault();
+                setActiveInput('den');
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActiveInput('num');
+                return;
+            }
+        }
+        
+        if (e.key.match(/^[0-9-]$/) || e.key === 'Backspace') {
+            e.preventDefault();
+            handleKeyPress(e.key);
+        }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+    };
+}, [handleNextQuestion, handleKeyPress, questions, currentQuestionIndex]);
 
   const currentQuestion = questions[currentQuestionIndex];
-  if (!currentQuestion) return <div>Generating questions...</div>;
+  if (!currentQuestion) return <div className="fixed inset-0 flex items-center justify-center">Generating questions...</div>;
   
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
   
   return (
-    <div className="w-full max-w-4xl mx-auto flex flex-col gap-6">
-        <div className="w-full flex justify-between items-center text-lg font-semibold">
-            <span>Question: {currentQuestionIndex + 1} / {TOTAL_QUESTIONS}</span>
-            <span className="text-red-500">{minutes}:{seconds < 10 ? `0${seconds}` : seconds}</span>
-        </div>
-        <div className="w-full h-1 bg-slate-200 dark:bg-slate-700 rounded-full">
-            <div className="h-1 bg-blue-500 rounded-full" style={{ width: `${((currentQuestionIndex + 1) / TOTAL_QUESTIONS) * 100}%` }}></div>
+    <div className="fixed inset-0 bg-slate-100 dark:bg-slate-900 p-2 sm:p-4 flex flex-col z-50">
+        <div className="flex-shrink-0">
+            <div className="w-full flex justify-between items-center text-base sm:text-lg font-semibold">
+                <span>Question: {currentQuestionIndex + 1} / {TOTAL_QUESTIONS}</span>
+                <span className="text-red-500">{minutes}:{seconds < 10 ? `0${seconds}` : seconds}</span>
+            </div>
+            <div className="w-full h-1 bg-slate-200 dark:bg-slate-700 rounded-full mt-1">
+                <div className="h-1 bg-blue-500 rounded-full" style={{ width: `${((currentQuestionIndex + 1) / TOTAL_QUESTIONS) * 100}%` }}></div>
+            </div>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-lg shadow-lg w-full flex items-center justify-center min-h-[150px]">
-                <div className="flex items-center justify-center gap-4 text-4xl">
+        <div className="flex-grow flex flex-col landscape:flex-row items-center justify-center gap-4 py-2 overflow-hidden">
+            <div className="w-full landscape:w-1/2 h-full flex items-center justify-center bg-white dark:bg-slate-800 p-4 rounded-lg shadow-lg">
+                <div className="flex items-center justify-center gap-2 sm:gap-4 text-3xl sm:text-4xl">
                     <span className="font-mono tracking-wider">{`\\(${currentQuestion.text}\\)`}</span>
                     <span className="font-bold">=</span>
                     {currentQuestion.type === 'integer' ? (
-                        <input 
-                            type="text" 
-                            value={intAnswer}
-                            onChange={e => setIntAnswer(e.target.value.replace(/[^0-9-]/g, ''))}
-                            onFocus={() => setActiveInput('int')}
-                            onKeyDown={e => { if(e.key === 'Enter') handleNextQuestion() }}
-                            className="w-32 text-center text-3xl p-2 bg-slate-200 dark:bg-slate-700 rounded-md border-2 border-transparent focus:border-blue-500 focus:outline-none"
-                            autoFocus
-                        />
+                       <div 
+                           onClick={() => setActiveInput('int')}
+                           className={`w-24 sm:w-32 h-16 text-center text-3xl p-2 bg-slate-200 dark:bg-slate-700 rounded-md border-2 flex items-center justify-center cursor-text transition-colors ${activeInput === 'int' ? 'border-blue-500' : 'border-transparent'}`}
+                           role="textbox"
+                           aria-label="Integer answer"
+                       >
+                           <span className="truncate">{intAnswer}</span>
+                           {activeInput === 'int' && <span className="animate-blink font-light ml-1">|</span>}
+                       </div>
                     ) : (
                         <div className="inline-flex flex-col items-center">
-                            <input 
-                                type="text" 
-                                value={numAnswer}
-                                onChange={e => setNumAnswer(e.target.value.replace(/[^0-9-]/g, ''))}
-                                onFocus={() => setActiveInput('num')}
-                                onKeyDown={e => { if(e.key === 'Enter') denRef.current?.focus() }}
-                                className="w-24 text-center text-3xl p-2 bg-slate-200 dark:bg-slate-700 rounded-md border-2 border-transparent focus:border-blue-500 focus:outline-none"
-                                autoFocus
-                            />
-                            <div className="w-28 h-1 bg-slate-900 dark:bg-slate-200 my-2"></div>
-                            <input 
-                                ref={denRef}
-                                type="text" 
-                                value={denAnswer}
-                                onChange={e => setDenAnswer(e.target.value.replace(/[^0-9-]/g, ''))}
-                                onFocus={() => setActiveInput('den')}
-                                onKeyDown={e => { if(e.key === 'Enter') handleNextQuestion() }}
-                                className="w-24 text-center text-3xl p-2 bg-slate-200 dark:bg-slate-700 rounded-md border-2 border-transparent focus:border-blue-500 focus:outline-none"
-                            />
+                            <div 
+                                onClick={() => setActiveInput('num')}
+                                className={`w-20 sm:w-24 h-16 text-center text-3xl p-2 bg-slate-200 dark:bg-slate-700 rounded-md border-2 flex items-center justify-center cursor-text transition-colors ${activeInput === 'num' ? 'border-blue-500' : 'border-transparent'}`}
+                                role="textbox"
+                                aria-label="Numerator"
+                            >
+                                <span className="truncate">{numAnswer}</span>
+                                {activeInput === 'num' && <span className="animate-blink font-light ml-1">|</span>}
+                            </div>
+                            <div className="w-24 sm:w-28 h-1 bg-slate-900 dark:bg-slate-200 my-2"></div>
+                            <div 
+                                onClick={() => setActiveInput('den')}
+                                className={`w-20 sm:w-24 h-16 text-center text-3xl p-2 bg-slate-200 dark:bg-slate-700 rounded-md border-2 flex items-center justify-center cursor-text transition-colors ${activeInput === 'den' ? 'border-blue-500' : 'border-transparent'}`}
+                                role="textbox"
+                                aria-label="Denominator"
+                            >
+                                <span className="truncate">{denAnswer}</span>
+                                {activeInput === 'den' && <span className="animate-blink font-light ml-1">|</span>}
+                            </div>
                         </div>
                     )}
                 </div>
             </div>
 
-            <div className="flex flex-col items-center gap-4">
-              <NumberPad onKeyPress={handleKeyPress} />
-              <button onClick={handleNextQuestion} className="w-full max-w-xs bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition-transform transform hover:scale-105">
+            <div className="w-full max-w-sm landscape:max-w-none landscape:w-1/2 h-full flex flex-col items-center justify-center gap-2 sm:gap-4">
+              <div className="w-full max-w-[280px] sm:max-w-xs">
+                 <NumberPad onKeyPress={handleKeyPress} />
+              </div>
+              <button onClick={handleNextQuestion} className="w-full max-w-[280px] sm:max-w-xs bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition-transform transform hover:scale-105">
                   {currentQuestionIndex >= TOTAL_QUESTIONS - 1 ? 'Finish' : 'Next'}
               </button>
             </div>

@@ -1,4 +1,5 @@
 import { Question, RationalNumber } from '../types';
+import { TOTAL_QUESTIONS } from '../constants';
 
 // --- Math Helpers ---
 const gcd = (a: number, b: number): number => {
@@ -20,18 +21,35 @@ const getRandomInt = (min: number, max: number): number => {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 };
 
+// NEW HELPER to avoid generating zeros for addition/subtraction
+const getRandomNonZeroInt = (min: number, max: number): number => {
+    // If the range doesn't include 0, or is only 0, no special logic needed
+    if (min > 0 || max < 0 || (min === 0 && max === 0)) {
+        return getRandomInt(min, max);
+    }
+    
+    let num;
+    do {
+        num = getRandomInt(min, max);
+    } while (num === 0);
+    return num;
+};
+
+
 // --- Question Generation based on Python script ---
 
 const addInteger = (params: number[]): Omit<Question, 'id'> => {
-    const n1 = getRandomInt(params[3], params[4]);
-    const n2 = getRandomInt(params[3], params[4]);
+    // UPDATED: Use getRandomNonZeroInt to prevent adding by zero
+    const n1 = getRandomNonZeroInt(params[3], params[4]);
+    const n2 = getRandomNonZeroInt(params[3], params[4]);
     const answer = n1 + n2;
     return { text: `${n1} + ${n2}`, type: 'integer', answer, operationType: 'add', operands: [n1, n2] };
 };
 
 const subtractInteger = (level: number, params: number[]): Omit<Question, 'id'> => {
-    let n1 = getRandomInt(params[5], params[6]);
-    let n2 = getRandomInt(params[5], params[6]);
+    // UPDATED: Use getRandomNonZeroInt to prevent subtracting by zero
+    let n1 = getRandomNonZeroInt(params[5], params[6]);
+    let n2 = getRandomNonZeroInt(params[5], params[6]);
     
     if (level < 6) {
         // This logic ensures a positive result where the answer is one of the original numbers
@@ -46,15 +64,41 @@ const subtractInteger = (level: number, params: number[]): Omit<Question, 'id'> 
 };
 
 const multiplyInteger = (params: number[]): Omit<Question, 'id'> => {
-    const n1 = getRandomInt(params[7], params[8]);
-    const n2 = getRandomInt(params[7], params[8]);
+    let n1 = getRandomInt(params[7], params[8]);
+    let n2 = getRandomInt(params[7], params[8]);
+
+    // UPDATED: Reduce the chance of multiplying by 1 or -1 to make it rare
+    if (Math.abs(n1) === 1 || Math.abs(n2) === 1) {
+        if (Math.random() < 0.75) { // 75% chance to reroll
+            const min = params[7];
+            const max = params[8];
+            // Ensure reroll is possible and won't be an infinite loop
+            if (max > min) {
+                 do {
+                    n1 = getRandomInt(min, max);
+                    n2 = getRandomInt(min, max);
+                } while (Math.abs(n1) === 1 || Math.abs(n2) === 1);
+            }
+        }
+    }
+
     const answer = n1 * n2;
     return { text: `${n1} \\times ${n2}`, type: 'integer', answer, operationType: 'mul', operands: [n1, n2] };
 };
 
 const divideInteger = (level: number, params: number[]): Omit<Question, 'id'> => {
     const y = (Math.random() < 0.45 && level > 5) ? -1 : 1;
-    const bBase = getRandomInt(1, params[10]);
+    let bBase = getRandomInt(1, params[10]);
+    
+    // UPDATED: Reduce the chance of dividing by 1 or -1
+    if (bBase === 1 && params[10] > 1) { // Check if rerolling is possible
+        if (Math.random() < 0.75) { // 75% chance to reroll
+            do {
+                bBase = getRandomInt(1, params[10]);
+            } while (bBase === 1);
+        }
+    }
+
     const randInt = getRandomInt(params[9], params[10]);
     const n1 = bBase * params[11] * randInt;
     const n2 = bBase * y;
@@ -104,8 +148,7 @@ const divideFraction = (params: number[]): Omit<Question, 'id'> => {
     return { text: `\\frac{${r1.num}}{${r1.den}} \\div \\frac{${r2.num}}{${r2.den}}`, type: 'rational', answer, operationType: 'div', operands: [r1, r2] };
 };
 
-
-export const generateQuestion = (level: number, levelParamsInt: number[][], levelParamsFrac: number[][]): Question => {
+const generateSingleQuestion = (level: number, levelParamsInt: number[][], levelParamsFrac: number[][]): Question => {
     let questionData: Omit<Question, 'id'>;
     const isFractionLevel = level > 10;
     const fracLevelParams = isFractionLevel ? levelParamsFrac[level - 11] : [];
@@ -138,4 +181,53 @@ export const generateQuestion = (level: number, levelParamsInt: number[][], leve
     }
 
   return { id: crypto.randomUUID(), ...questionData };
+};
+
+// NEW HELPER: Generates a unique key for a question to detect duplicates and commutative equivalents.
+const getQuestionKey = (q: Question): string => {
+    const op = q.operationType;
+    // Standardize operand representation for the key
+    const operandsAsStrings = q.operands.map(o => {
+        if (typeof o === 'number') return o.toString();
+        // Simplify fraction before creating key to handle e.g. 2/4 vs 1/2
+        const simplified = simplifyFraction(o);
+        return `${simplified.num}/${simplified.den}`;
+    });
+
+    // For commutative operations, sort operands to treat 'a+b' and 'b+a' as the same.
+    if (op === 'add' || op === 'mul') {
+        operandsAsStrings.sort();
+    }
+    return `${op}:${operandsAsStrings.join(',')}`;
+}
+
+
+// NEW EXPORTED FUNCTION: Generates a full, unique set of test questions.
+export const generateTestQuestions = (level: number, levelParamsInt: number[][], levelParamsFrac: number[][]): Question[] => {
+    const questions: Question[] = [];
+    const keys = new Set<string>();
+    
+    const maxAttempts = TOTAL_QUESTIONS * 15; // Safeguard against infinite loops
+    let attempts = 0;
+
+    while (questions.length < TOTAL_QUESTIONS && attempts < maxAttempts) {
+        const newQuestion = generateSingleQuestion(level, levelParamsInt, levelParamsFrac);
+        const key = getQuestionKey(newQuestion);
+        
+        if (!keys.has(key)) {
+            keys.add(key);
+            questions.push(newQuestion);
+        }
+        attempts++;
+    }
+
+    if (questions.length < TOTAL_QUESTIONS) {
+        console.warn(`Could not generate ${TOTAL_QUESTIONS} unique questions for level ${level}. Generated ${questions.length}. Filling with non-unique questions.`);
+        // Fill the rest with non-unique questions if the question variety for the level is too small.
+        while (questions.length < TOTAL_QUESTIONS) {
+             questions.push(generateSingleQuestion(level, levelParamsInt, levelParamsFrac));
+        }
+    }
+
+    return questions;
 };

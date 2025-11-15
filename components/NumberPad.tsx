@@ -11,7 +11,7 @@ const NumberPad: React.FC<NumberPadProps> = ({ onKeyPress }) => {
   const KeyButton: React.FC<{ value: string }> = ({ value }) => (
     <button
       onClick={() => onKeyPress(value)}
-      className="bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg text-2xl font-bold transition-colors duration-150 aspect-square flex items-center justify-center shadow-md"
+      className="bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg text-xl sm:text-2xl font-bold transition-colors duration-150 aspect-square flex items-center justify-center shadow-md"
       aria-label={value === 'Backspace' ? 'Backspace' : `Number ${value}`}
     >
       {value === 'Backspace' ? (
@@ -25,7 +25,7 @@ const NumberPad: React.FC<NumberPadProps> = ({ onKeyPress }) => {
   );
 
   return (
-    <div className="grid grid-cols-3 gap-2 p-2 bg-slate-100 dark:bg-slate-800 rounded-xl shadow-inner w-full max-w-xs mx-auto">
+    <div className="grid grid-cols-3 gap-2 p-2 bg-slate-100 dark:bg-slate-800 rounded-xl shadow-inner w-full">
       {keys.map((key) => (
         <KeyButton key={key} value={key} />
       ))}
