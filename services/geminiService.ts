@@ -81,9 +81,8 @@ export async function analyzeStudentHistory(history: TestAttempt[]): Promise<str
 }
 
 
-export async function analyzeClassTrends(
-  classStudentsData: { studentName: string; data: StudentData }[],
-  totalQuestions: number
+export async function analyzeClassForGroupings(
+  classStudentsData: { studentName: string; data: StudentData }[]
 ): Promise<string> {
   // Fix: Adhere to Gemini API guidelines by using process.env.API_KEY
   if (!process.env.API_KEY) {
@@ -98,29 +97,37 @@ export async function analyzeClassTrends(
   
   const formattedData = classStudentsData
     .map(student => {
-      if (!student.data || student.data.history.length === 0) {
-        return `Student: ${student.studentName}\n  - No test history yet.`;
-      }
-      const historySummary = student.data.history
-        .map(attempt => `  - Lvl ${attempt.level}: ${attempt.correctCount}/${totalQuestions} correct`)
-        .join('\n');
-      return `Student: ${student.studentName} (Current Level: ${student.data.currentLevel})\n${historySummary}`;
+        if (!student.data || !student.data.history || student.data.history.length === 0) {
+            return `Student: ${student.studentName}\n  - No test history yet.`;
+        }
+        
+        const wrongAnswersSummary = student.data.history
+            .flatMap(attempt => attempt.answeredQuestions)
+            .filter(q => !q.isCorrect)
+            .map(q => `    - Question: ${q.questionText.replace('\\', '')}, Op: ${q.operationType}, Operands: [${formatOperands(q.operands)}]`)
+            .slice(-5) // Take last 5 wrong answers per student to keep prompt manageable
+            .join('\n');
+
+        if (wrongAnswersSummary.length === 0) {
+            return `Student: ${student.studentName} (Current Level: ${student.data.currentLevel})\n  - No recent incorrect answers found.`;
+        }
+
+        return `Student: ${student.studentName} (Current Level: ${student.data.currentLevel})\n  - Recent Incorrect Answers:\n${wrongAnswersSummary}`;
     })
     .join('\n\n');
 
   const prompt = `
-    You are an expert data analyst and math tutor. You will be given a summary of test histories for an entire class of students. Your task is to provide a high-level summary of class-wide trends for the teacher.
+    You are an expert educational analyst. You are given data on students' recent incorrect answers in an arithmetic test. Your task is to identify common weaknesses and group students to help a teacher form small support groups.
 
-    The data is structured as a list of students, each with their current level and a summary of their past test attempts (level and score).
+    Based on the provided data:
+    1.  **Identify Common Weakness Themes:** Look for recurring error patterns across multiple students. Examples could be: specific times tables (e.g., errors in questions involving 7s, 8s), operations with negative numbers, subtraction that requires borrowing, or specific fraction operations.
+    2.  **Group Students:** List the identified themes as clear, bolded markdown headers (e.g., **Difficulty with Negative Numbers**). Under each header, list the names of the students who exhibit that weakness. A student can appear in multiple groups.
+    3.  **Provide Actionable Advice:** For each group, give a brief, concrete suggestion for a small group activity or focus area.
+    4.  **Acknowledge Strong Students:** If any students have no recent errors, list them under a "Confident Students" group who may not need immediate intervention.
 
-    Based on the aggregated data, analyze the following:
-    1.  **Overall Performance:** How is the class performing as a whole? Are most students progressing well, or are many struggling?
-    2.  **Student Grouping:** Identify groups of students based on their current level and progress. Are there high-flyers who are advancing quickly? Is there a group in the middle? Is there a group that seems stuck on a certain level?
-    3.  **Actionable Insights:** Based on the groups, suggest what the teacher could do. For example: "The top group (mention names) seems ready for more challenging material. The group struggling around level 5 (mention names) might benefit from a review of negative numbers."
+    Your output should be well-formatted using markdown.
 
-    Synthesize these points into a concise, actionable summary for the teacher. Focus on the big picture and group trends. Be encouraging and constructive.
-
-    Here is the class data:
+    Here is the data of incorrect answers for the class:
     ${formattedData}
     `;
 
@@ -133,5 +140,54 @@ export async function analyzeClassTrends(
   } catch (error) {
     console.error("Error calling Gemini API:", error);
     return "There was an error analyzing class trends. Please try again later.";
+  }
+}
+
+export async function analyzeSchoolTrends(
+  allStudentsData: { studentName: string; data: StudentData }[]
+): Promise<string> {
+  // Fix: Adhere to Gemini API guidelines by using process.env.API_KEY
+  if (!process.env.API_KEY) {
+    return "Gemini API Key is not configured. Could not analyze school trends.";
+  }
+  if (allStudentsData.length === 0) {
+    return "There are no students in the school to analyze.";
+  }
+
+  // Fix: Adhere to Gemini API guidelines for initialization
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  const formattedData = allStudentsData
+    .map(student => {
+      if (!student.data) return null;
+      return ` - ${student.studentName}: Level ${student.data.currentLevel}`;
+    })
+    .filter(Boolean)
+    .join('\n');
+    
+  const prompt = `
+    You are an expert data analyst for a school administrator. You are given a list of all students in the school and their current math level in an adaptive arithmetic program. Your task is to provide a high-level executive summary of the school's overall performance.
+
+    Based on the provided list of student levels:
+    1.  **Overall Distribution:** Briefly describe the distribution of students across the levels. Are most students at the beginner (1-5), intermediate (6-12), or advanced (13+) levels?
+    2.  **Identify At-Risk Cohorts:** Identify any significant groups of students who are clustered at lower levels. This could indicate a school-wide or grade-wide gap in foundational knowledge. Mention the level ranges where students seem to be "stuck".
+    3.  **Identify High-Achievers:** Acknowledge the group of students who are progressing to the highest levels, as they may need further enrichment.
+    4.  **Actionable Recommendations:** Suggest broad, school-level interventions. For example: "A significant number of students are struggling with levels 4-6, which focus on negative numbers. Consider organizing cross-class workshops on this topic." or "The students at the highest levels could be challenged with a math club or advanced projects."
+
+    Be concise, use markdown for formatting, and focus on the big picture to help the administrator allocate resources effectively.
+
+    Here is the list of all students and their current levels:
+    ${formattedData}
+    `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    });
+    return response.text;
+  } catch (error) {
+    console.error("Error calling Gemini API:", error);
+    return "There was an error analyzing school trends. Please try again later.";
   }
 }

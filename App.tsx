@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { TOTAL_QUESTIONS, TEST_DURATION_SECONDS, DEFAULT_LEVEL_PARAMS_INT, DEFAULT_LEVEL_PARAMS_FRAC } from './constants';
 import { Question, StudentData, TestAttempt, RationalNumber, AnsweredQuestion, User, AdminUser, TeacherUser, StudentUser, Class, Role } from './types';
 import { generateTestQuestions } from './services/questionService';
-import { analyzeStudentHistory, analyzeClassTrends } from './services/geminiService';
+import { analyzeStudentHistory, analyzeClassForGroupings, analyzeSchoolTrends } from './services/geminiService';
 import * as api from './services/mockService'; // Use the new mock service
 import NumberPad from './components/NumberPad';
 
@@ -89,7 +89,7 @@ const LoginScreen: React.FC<{ onLogin: (user: User) => void }> = ({ onLogin }) =
                         type="text" 
                         value={email} 
                         onChange={e => setEmail(e.target.value)}
-                        placeholder="admin@sprint.com or john.doe"
+                        placeholder="admin@sprint.com or student.aa1"
                         className="w-full p-3 mt-1 rounded bg-slate-200 dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         disabled={isLoading}
                     />
@@ -110,7 +110,8 @@ const LoginScreen: React.FC<{ onLogin: (user: User) => void }> = ({ onLogin }) =
                 </button>
                  <div className="text-xs text-slate-500 dark:text-slate-400 text-center pt-4">
                     <p><b>Admin:</b> admin@sprint.com / admin</p>
-                    <p><b>Teacher/Student:</b> Use accounts created by admin.</p>
+                    <p><b>Teachers:</b> teachA@sprint.com / password</p>
+                    <p><b>Students:</b> student.aa1 / password</p>
                 </div>
             </form>
         </div>
@@ -135,20 +136,92 @@ const AppHeader: React.FC<{ user: User, onLogout: () => void }> = ({ user, onLog
 
 // --- Admin View ---
 const AdminView: React.FC = () => {
-    const [view, setView] = useState<'params' | 'users' >('params');
+    const [view, setView] = useState<'classes' | 'summary' | 'params' | 'users' >('classes');
+    const [allClasses, setAllClasses] = useState<Class[]>([]);
+    const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+    const [isLoadingClasses, setIsLoadingClasses] = useState(true);
+
+    useEffect(() => {
+        if (view === 'classes' && !selectedClass) {
+            setIsLoadingClasses(true);
+            api.getAllClasses()
+                .then(setAllClasses)
+                .catch(e => console.error(e))
+                .finally(() => setIsLoadingClasses(false));
+        }
+    }, [view, selectedClass]);
+
+    if (selectedClass) {
+        return <ClassDetailView aClass={selectedClass} onBack={() => setSelectedClass(null)} />;
+    }
 
     return (
         <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-lg">
             <h2 className="text-3xl font-bold mb-4">Admin Dashboard</h2>
             <nav className="mb-6 border-b border-slate-300 dark:border-slate-600">
-                <button onClick={() => setView('params')} className={`px-4 py-2 mr-2 rounded-t-lg ${view === 'params' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>Level Parameters</button>
-                <button onClick={() => setView('users')} className={`px-4 py-2 rounded-t-lg ${view === 'users' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>User Management</button>
+                <button onClick={() => setView('classes')} className={`px-4 py-2 mr-2 rounded-t-lg ${view === 'classes' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>All Classes</button>
+                <button onClick={() => setView('summary')} className={`px-4 py-2 mr-2 rounded-t-lg ${view === 'summary' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>School Summary</button>
+                <button onClick={() => setView('users')} className={`px-4 py-2 mr-2 rounded-t-lg ${view === 'users' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>User Management</button>
+                <button onClick={() => setView('params')} className={`px-4 py-2 rounded-t-lg ${view === 'params' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>Level Parameters</button>
             </nav>
+            {view === 'classes' && (
+                isLoadingClasses ? <p>Loading classes...</p> :
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {allClasses.map(c => (
+                         <button key={c.id} onClick={() => setSelectedClass(c)} className="p-6 bg-slate-200 dark:bg-slate-700 rounded-lg shadow hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors text-left">
+                            <p className="font-bold text-xl">{c.name}</p>
+                            <p>{c.studentIds.length} Students</p>
+                        </button>
+                    ))}
+                </div>
+            )}
+            {view === 'summary' && <SchoolSummaryView />}
             {view === 'params' && <LevelParametersEditor />}
             {view === 'users' && <UserManagement />}
         </div>
-    )
-}
+    );
+};
+
+const SchoolSummaryView: React.FC = () => {
+    const [summary, setSummary] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleGetSummary = async () => {
+        setIsLoading(true);
+        setSummary('');
+        try {
+            const users = await api.getUsers();
+            const profiles = await api.getAllStudentProfiles();
+            const studentUsers = users.filter(u => u.role === 'student');
+            
+            const allStudentsData = studentUsers.map(s => ({
+                studentName: `${s.firstName} ${s.surname}`,
+                data: profiles[s.id]
+            })).filter(s => s.data);
+
+            const result = await analyzeSchoolTrends(allStudentsData);
+            setSummary(result);
+        } catch (e) {
+            console.error(e);
+            setSummary('Could not generate school summary at this time.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    return (
+        <div>
+            <h3 className="text-xl font-semibold mb-4">School-wide Executive Summary</h3>
+            <button onClick={handleGetSummary} disabled={isLoading} className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg mb-4 disabled:bg-purple-300">
+                {isLoading ? 'Analyzing All Students...' : 'Generate School Summary'}
+            </button>
+            {summary && (
+                <div className="p-4 bg-slate-100 dark:bg-slate-700 rounded-lg whitespace-pre-wrap">{summary}</div>
+            )}
+        </div>
+    );
+};
+
 
 const UserManagement: React.FC = () => {
     const [users, setUsers] = useState<User[]>([]);
@@ -259,7 +332,7 @@ const TeacherView: React.FC<{ currentUser: TeacherUser }> = ({ currentUser }) =>
             <h2 className="text-3xl font-bold mb-4">Teacher Dashboard</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {teacherClasses.map(c => (
-                    <button key={c.id} onClick={() => setSelectedClassId(c.id)} className="p-6 bg-blue-500 text-white rounded-lg shadow hover:bg-blue-600 transition-colors">
+                    <button key={c.id} onClick={() => setSelectedClassId(c.id)} className="p-6 bg-blue-500 text-white rounded-lg shadow hover:bg-blue-600 transition-colors text-left">
                         <p className="font-bold text-xl">{c.name}</p>
                         <p>{c.studentIds.length} Students</p>
                     </button>
@@ -282,15 +355,86 @@ const TeacherView: React.FC<{ currentUser: TeacherUser }> = ({ currentUser }) =>
     );
 };
 
+const StudentDetailModal: React.FC<{ student: StudentUser, profile: StudentData | null, onClose: () => void }> = ({ student, profile, onClose }) => {
+    const [summary, setSummary] = useState('');
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const getSummary = async () => {
+            setIsLoading(true);
+            if (!profile || !profile.history || profile.history.length === 0) {
+                setSummary("This student has not completed any tests yet. The AI summary will be available after their first attempt.");
+                setIsLoading(false);
+                return;
+            }
+            if (profile.history.reduce((acc, cv) => acc + cv.answeredQuestions.length, 0) < 10) {
+              setSummary("Complete a few more tests to unlock detailed, long-term feedback and analysis from the tutor.");
+              setIsLoading(false);
+              return;
+            }
+
+            const result = await analyzeStudentHistory(profile.history);
+            setSummary(result);
+            setIsLoading(false);
+        };
+        getSummary();
+    }, [profile]);
+
+    // Handle modal closing with Escape key
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [onClose]);
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl p-6 w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center border-b border-slate-300 dark:border-slate-600 pb-3 mb-4">
+                    <h3 className="text-2xl font-bold">{student.firstName} {student.surname}</h3>
+                    <button onClick={onClose} className="text-3xl font-light hover:text-red-500 transition-colors">&times;</button>
+                </div>
+                <p className="mb-4 text-lg">Current Level: <span className="font-bold text-blue-500">{profile?.currentLevel ?? 'N/A'}</span></p>
+                <div className="flex-grow overflow-y-auto pr-2">
+                    <h4 className="font-semibold text-lg mb-2">AI Performance Summary</h4>
+                    <div className="p-4 bg-slate-100 dark:bg-slate-700 rounded-lg min-h-[200px]">
+                        {isLoading ? (
+                           <div className="animate-pulse flex space-x-4">
+                             <div className="flex-1 space-y-3 py-1">
+                               <div className="h-2 bg-slate-300 dark:bg-slate-600 rounded"></div>
+                               <div className="h-2 bg-slate-300 dark:bg-slate-600 rounded w-5/6"></div>
+                               <div className="h-2 bg-slate-300 dark:bg-slate-600 rounded"></div>
+                               <div className="h-2 bg-slate-300 dark:bg-slate-600 rounded w-4/6"></div>
+                             </div>
+                           </div>
+                         ) : (
+                           <p className="whitespace-pre-wrap">{summary}</p>
+                         )}
+                    </div>
+                </div>
+                 <div className="mt-4 pt-4 border-t border-slate-300 dark:border-slate-600 text-right">
+                    <button onClick={onClose} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg">Close</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 const ClassDetailView: React.FC<{aClass: Class, onBack: () => void}> = ({ aClass, onBack }) => {
     const [allUsers, setAllUsers] = useState<User[]>([]);
     const [students, setStudents] = useState<StudentUser[]>([]);
     const [studentProfiles, setStudentProfiles] = useState<Record<string, StudentData>>({});
     const [isLoading, setIsLoading] = useState(true);
+    const [selectedStudent, setSelectedStudent] = useState<StudentUser | null>(null);
 
     const [searchTerm, setSearchTerm] = useState('');
-    const [classTrends, setClassTrends] = useState('');
-    const [isLoadingTrends, setIsLoadingTrends] = useState(false);
+    const [classGroupings, setClassGroupings] = useState('');
+    const [isLoadingGroupings, setIsLoadingGroupings] = useState(false);
     const [showCreateStudent, setShowCreateStudent] = useState(false);
     const [newStudentForm, setNewStudentForm] = useState({ firstName: '', surname: '', password: '' });
 
@@ -367,23 +511,23 @@ const ClassDetailView: React.FC<{aClass: Class, onBack: () => void}> = ({ aClass
         } catch (e) { console.error(e); }
     };
 
-    const handleGetTrends = async () => {
-      setIsLoadingTrends(true);
-      setClassTrends('');
+    const handleGetGroupings = async () => {
+      setIsLoadingGroupings(true);
+      setClassGroupings('');
       try {
         const studentDataForClass = students
           .map(s => ({
             studentName: `${s.firstName} ${s.surname}`,
             data: studentProfiles[s.id]
           }))
-          .filter(s => s.data); // Filter out students for whom profile loading might have failed
-        const trends = await analyzeClassTrends(studentDataForClass, TOTAL_QUESTIONS);
-        setClassTrends(trends);
+          .filter(s => s.data); 
+        const trends = await analyzeClassForGroupings(studentDataForClass);
+        setClassGroupings(trends);
       } catch (e) {
         console.error(e);
-        setClassTrends("Could not analyze trends at this time.");
+        setClassGroupings("Could not analyze groupings at this time.");
       } finally {
-        setIsLoadingTrends(false);
+        setIsLoadingGroupings(false);
       }
     };
 
@@ -391,19 +535,26 @@ const ClassDetailView: React.FC<{aClass: Class, onBack: () => void}> = ({ aClass
 
     return (
         <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-lg">
+            {selectedStudent && (
+              <StudentDetailModal 
+                  student={selectedStudent} 
+                  profile={studentProfiles[selectedStudent.id]} 
+                  onClose={() => setSelectedStudent(null)} 
+              />
+            )}
             <button onClick={onBack} className="text-blue-500 mb-4">&larr; Back to Dashboard</button>
             <h2 className="text-3xl font-bold mb-4">{aClass.name}</h2>
             <div className="mb-6 flex flex-wrap gap-2">
                 <button onClick={() => toggleLockAll(true)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm">Lock All</button>
                 <button onClick={() => toggleLockAll(false)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm">Unlock All</button>
-                <button onClick={handleGetTrends} disabled={isLoadingTrends} className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg text-sm disabled:bg-purple-300">
-                  {isLoadingTrends ? 'Analyzing...' : 'Get Class Trends'}
+                <button onClick={handleGetGroupings} disabled={isLoadingGroupings} className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg text-sm disabled:bg-purple-300">
+                  {isLoadingGroupings ? 'Analyzing...' : 'Get Student Groupings'}
                 </button>
             </div>
-             {classTrends && (
+             {classGroupings && (
                 <div className="mb-6 p-4 bg-slate-100 dark:bg-slate-700 rounded-lg">
-                    <h4 className="font-semibold text-lg mb-2">Class Trends Analysis</h4>
-                    <p className="whitespace-pre-wrap">{classTrends}</p>
+                    <h4 className="font-semibold text-lg mb-2">AI-Generated Student Groups</h4>
+                    <p className="whitespace-pre-wrap">{classGroupings}</p>
                 </div>
              )}
             
@@ -414,7 +565,9 @@ const ClassDetailView: React.FC<{aClass: Class, onBack: () => void}> = ({ aClass
                         {students.length === 0 && <p className="text-slate-500">No students enrolled yet.</p>}
                         {students.map(s => (
                             <div key={s.id} className="flex justify-between items-center p-2 bg-slate-200 dark:bg-slate-700 rounded">
-                                <span>{s.firstName} {s.surname} (Lvl: {studentProfiles[s.id]?.currentLevel || 1})</span>
+                                <button onClick={() => setSelectedStudent(s)} className="text-left flex-grow hover:underline">
+                                    {s.firstName} {s.surname} (Lvl: {studentProfiles[s.id]?.currentLevel || 'N/A'})
+                                </button>
                                 <button onClick={() => toggleLock(s.id)} className={`px-3 py-1 text-xs rounded-full ${s.locked ? 'bg-red-200 text-red-800' : 'bg-green-200 text-green-800'}`}>{s.locked ? 'Locked' : 'Unlocked'}</button>
                             </div>
                         ))}

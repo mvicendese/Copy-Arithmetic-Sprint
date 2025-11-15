@@ -3,25 +3,78 @@ import { DEFAULT_LEVEL_PARAMS_INT, DEFAULT_LEVEL_PARAMS_FRAC } from '../constant
 
 // --- IN-MEMORY DATABASE ---
 const db: AppDatabase = {
-  users: [
-    { id: 'admin-1', role: 'admin', firstName: 'Admin', surname: 'User', email: 'admin@sprint.com', password: 'admin' },
-    { id: 'teacher-1', role: 'teacher', firstName: 'Ada', surname: 'Lovelace', email: 'ada@sprint.com', password: 'password' },
-    { id: 'student-1', role: 'student', firstName: 'John', surname: 'Doe', password: 'password', locked: false },
-    { id: 'student-2', role: 'student', firstName: 'Jane', surname: 'Smith', password: 'password', locked: true },
-    { id: 'student-3', role: 'student', firstName: 'Peter', surname: 'Jones', password: 'password', locked: false },
-  ],
-  classes: [
-    { id: 'class-1', name: 'Grade 5 Math', teacherIds: ['teacher-1'], studentIds: ['student-1', 'student-2'] },
-    { id: 'class-2', name: 'Grade 6 Math', teacherIds: ['teacher-1'], studentIds: [] },
-  ],
-  studentProfiles: {
-    'student-1': { currentLevel: 5, history: [], consecutiveFastTrackCount: 0 },
-    'student-2': { currentLevel: 2, history: [], consecutiveFastTrackCount: 1 },
-    'student-3': { currentLevel: 1, history: [], consecutiveFastTrackCount: 0 },
-  },
+  users: [],
+  classes: [],
+  studentProfiles: {},
   levelParamsInt: DEFAULT_LEVEL_PARAMS_INT,
   levelParamsFrac: DEFAULT_LEVEL_PARAMS_FRAC,
 };
+
+// --- DATA SEEDING ---
+const seedDatabase = () => {
+    // Clear existing data
+    db.users = [];
+    db.classes = [];
+    db.studentProfiles = {};
+
+    // Add the admin back
+    db.users.push({ id: 'admin-1', role: 'admin', firstName: 'Admin', surname: 'User', email: 'admin@sprint.com', password: 'admin' });
+
+    const teacherChars = ['A', 'B', 'C'];
+    const classChars = ['a', 'b', 'c'];
+
+    teacherChars.forEach(teacherChar => {
+        // Create Teacher
+        const teacherId = `teacher-${teacherChar}`;
+        const teacher = {
+            id: teacherId,
+            role: 'teacher' as const,
+            firstName: `Teach${teacherChar}`,
+            surname: 'User',
+            email: `teach${teacherChar}@sprint.com`,
+            password: 'password'
+        };
+        db.users.push(teacher);
+
+        classChars.forEach(classChar => {
+            // Create Class
+            const classId = `class-${teacherChar}${classChar}`;
+            const newClass = {
+                id: classId,
+                name: `Class ${teacherChar}${classChar}`,
+                teacherIds: [teacherId],
+                studentIds: [] as string[]
+            };
+
+            // Create 15 Students for this class
+            for (let i = 1; i <= 15; i++) {
+                const studentId = `student-${teacherChar}${classChar}${i}`;
+                const student = {
+                    id: studentId,
+                    role: 'student' as const,
+                    firstName: `Student`,
+                    surname: `${teacherChar}${classChar}${i}`,
+                    password: 'password',
+                    locked: false
+                };
+                db.users.push(student);
+                newClass.studentIds.push(studentId);
+
+                // Create a student profile with some varied data
+                db.studentProfiles[studentId] = {
+                    currentLevel: Math.floor(Math.random() * 5) + 1, // Level 1 to 5
+                    history: [], // Keep history empty to avoid excessive memory use
+                    consecutiveFastTrackCount: 0
+                };
+            }
+            db.classes.push(newClass);
+        });
+    });
+};
+
+// Initialize DB with seeded data
+seedDatabase();
+
 
 // --- Helper to simulate API call latency ---
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
@@ -48,7 +101,7 @@ export const login = async (usernameOrEmail: string, password: string): Promise<
     sessionStorage.setItem('currentUser', JSON.stringify(user));
     return { user };
   }
-  return { user: null, error: 'Invalid credentials. For students, username is firstname.lastname (e.g., john.doe)' };
+  return { user: null, error: 'Invalid credentials. For students, username is firstname.lastname (e.g., student.aa1)' };
 };
 
 export const logout = (): void => {
@@ -122,6 +175,11 @@ export const createStudentAndAddToClass = async (
 };
 
 // --- CLASS MANAGEMENT API ---
+export const getAllClasses = async (): Promise<Class[]> => {
+  await delay(100);
+  return [...db.classes];
+};
+
 export const getClassesForTeacher = async (teacherId: string): Promise<Class[]> => {
   await delay(100);
   return db.classes.filter((c: Class) => Array.isArray(c.teacherIds) && c.teacherIds.includes(teacherId));
@@ -153,6 +211,11 @@ export const addStudentToClass = async (classId: string, studentId: string): Pro
 };
 
 // --- STUDENT DATA API ---
+export const getAllStudentProfiles = async (): Promise<Record<string, StudentData>> => {
+    await delay(100);
+    return {...db.studentProfiles};
+}
+
 export const getStudentProfile = async (studentId: string): Promise<StudentData> => {
   await delay(50);
   if (db.studentProfiles[studentId]) {
