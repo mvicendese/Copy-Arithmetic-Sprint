@@ -70,33 +70,84 @@ const db: AppDatabase = {
 // --- DATA SEEDING ---
 const getRandomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-// Simulates a single test attempt for a student to generate history
-const simulateTestAttempt = (level: number, performance: 'high' | 'medium' | 'low'): TestAttempt => {
+type Weakness = 'negatives' | 'multiplication' | 'subtraction_borrow' | 'addition_carry';
+interface StudentCharacteristics {
+    performance: 'high' | 'medium' | 'low';
+    weaknesses: Weakness[];
+}
+
+// Generates a plausible question reflecting a specific weakness for more targeted AI analysis.
+const generateWeaknessQuestion = (level: number, weakness: Weakness): Pick<AnsweredQuestion, 'questionText' | 'operationType' | 'operands'> => {
+    switch (weakness) {
+        case 'negatives': {
+            const n1 = getRandomInt(-15, -1);
+            const n2 = getRandomInt(1, 15);
+            return { questionText: `${n1} + ${n2}`, operationType: 'add', operands: [n1, n2] };
+        }
+        case 'multiplication': {
+            const hardNumbers = [7, 8, 9, 12];
+            const n1 = hardNumbers[getRandomInt(0, hardNumbers.length - 1)];
+            const n2 = getRandomInt(2, 9);
+            return { questionText: `${n1} \\times ${n2}`, operationType: 'mul', operands: [n1, n2] };
+        }
+        case 'subtraction_borrow': {
+            const n1 = getRandomInt(21, 80);
+            const n2 = getRandomInt(2, 9);
+            if (n1 % 10 < n2) {
+                return { questionText: `${n1} - ${n2}`, operationType: 'sub', operands: [n1, n2] };
+            }
+            const n3 = getRandomInt(11, 18); // fallback
+            return { questionText: `${n1} - ${n3}`, operationType: 'sub', operands: [n1, n3] };
+        }
+        case 'addition_carry': {
+            const n1 = getRandomInt(11, 80);
+            const n2 = getRandomInt(11, 20);
+            if ((n1 % 10) + (n2 % 10) >= 10) {
+                 return { questionText: `${n1} + ${n2}`, operationType: 'add', operands: [n1, n2] };
+            }
+            const n3 = getRandomInt(5,9); // fallback
+            const n4 = getRandomInt(5,9);
+            return { questionText: `${n3} + ${n4}`, operationType: 'add', operands: [n3, n4] };
+        }
+    }
+};
+
+// Simulates a single test attempt, generating history that reflects a student's persona.
+const simulateTestAttempt = (level: number, characteristics: StudentCharacteristics): TestAttempt => {
     let correctCount = 0;
-    switch (performance) {
-        case 'high':
-            correctCount = getRandomInt(23, 25); // Excellent performance
-            break;
-        case 'medium':
-            correctCount = getRandomInt(19, 23); // Good enough to progress
-            break;
-        case 'low':
-            correctCount = getRandomInt(10, 18); // Will not progress
-            break;
+    switch (characteristics.performance) {
+        case 'high': correctCount = getRandomInt(23, 25); break;
+        case 'medium': correctCount = getRandomInt(19, 23); break;
+        case 'low': correctCount = getRandomInt(10, 18); break;
     }
     
-    // Generate some dummy answered questions, especially incorrect ones for the AI to analyze.
     const answeredQuestions: AnsweredQuestion[] = [];
+    const incorrectCount = TOTAL_QUESTIONS - correctCount;
+    let weaknessErrorsToMake = Math.floor(incorrectCount * 0.7); // 70% of errors should be from specific weaknesses
+
     for(let i = 0; i < TOTAL_QUESTIONS; i++) {
         const isCorrect = i < correctCount;
+        let questionData: Pick<AnsweredQuestion, 'questionText' | 'operationType' | 'operands'>;
+
+        if (!isCorrect && weaknessErrorsToMake > 0 && characteristics.weaknesses.length > 0) {
+            const weakness = characteristics.weaknesses[getRandomInt(0, characteristics.weaknesses.length - 1)];
+            questionData = generateWeaknessQuestion(level, weakness);
+            weaknessErrorsToMake--;
+        } else {
+            // Generic question for correct answers or random errors
+            questionData = {
+                questionText: `Q${i+1}`,
+                operationType: ['add', 'sub', 'mul', 'div'][getRandomInt(0,3)] as 'add' | 'sub' | 'mul' | 'div',
+                operands: [getRandomInt(1, 20), getRandomInt(1,20)],
+            };
+        }
+
         answeredQuestions.push({
-            questionText: `Q${i+1}`,
+            ...questionData,
             submittedAnswer: isCorrect ? 'correct' : 'incorrect',
             isCorrect: isCorrect,
             timeTakenSeconds: getRandomInt(5, 15),
-            operationType: ['add', 'sub', 'mul', 'div'][getRandomInt(0,3)] as 'add' | 'sub' | 'mul' | 'div',
-            operands: [getRandomInt(1, 20), getRandomInt(1,20)],
-        })
+        });
     }
 
     return {
@@ -118,9 +169,8 @@ const seedDatabase = () => {
 
     db.users.push({ id: 'admin-1', role: 'admin', firstName: 'Admin', surname: 'User', email: 'admin@sprint.com', password: 'admin' });
 
-    const teacherChars = ['A', 'B', 'C'];
-    const classChars = ['a', 'b', 'c'];
-
+    const teacherChars = ['A', 'B'];
+    const classChars = ['a', 'b'];
     const studentRegistry: string[] = [];
 
     teacherChars.forEach(teacherChar => {
@@ -134,7 +184,7 @@ const seedDatabase = () => {
             const classId = `class-${teacherChar}${classChar}`;
             const newClass = { id: classId, name: `Class ${teacherChar}${classChar}`, teacherIds: [teacherId], studentIds: [] as string[] };
 
-            for (let i = 1; i <= 15; i++) {
+            for (let i = 1; i <= 10; i++) {
                 const studentId = `student-${teacherChar}${classChar}${i}`;
                 const student = {
                     id: studentId, role: 'student' as const, firstName: `Student`, surname: `${teacherChar}${classChar}${i}`,
@@ -148,40 +198,59 @@ const seedDatabase = () => {
         });
     });
 
-    // Generate history for all students
-    const highPerformers = [studentRegistry[0], studentRegistry[1]]; // First two students
-    const lowPerformers = studentRegistry.slice(-3); // Last three students
+    // --- Define Student Personas ---
+    const studentPersonas: Record<string, StudentCharacteristics> = {};
+    studentRegistry.forEach((studentId, i) => {
+      const mod = i % 10;
+      if (mod < 2) { // 20% are high performers
+        studentPersonas[studentId] = { performance: 'high', weaknesses: [] };
+      } else if (mod < 4) { // 20% are struggling students
+        studentPersonas[studentId] = { performance: 'low', weaknesses: ['addition_carry', 'subtraction_borrow'] };
+      } else if (mod < 7) { // 30% are average with a specific weakness
+         studentPersonas[studentId] = { performance: 'medium', weaknesses: ['multiplication'] };
+      } else { // 30% are average with another weakness
+         studentPersonas[studentId] = { performance: 'medium', weaknesses: ['negatives'] };
+      }
+    });
 
+
+    // --- Generate Realistic History for All Students ---
     studentRegistry.forEach(studentId => {
-        let performance: 'high' | 'medium' | 'low' = 'medium';
-        if (highPerformers.includes(studentId)) performance = 'high';
-        if (lowPerformers.includes(studentId)) performance = 'low';
-
+        const characteristics = studentPersonas[studentId];
         let currentLevel = 1;
         let consecutiveFastTrackCount = 0;
         const history: TestAttempt[] = [];
-        const numTests = getRandomInt(10, 20);
+        const numTests = 12; // Give every student 12 tests for a consistent history length
 
         for (let i = 0; i < numTests; i++) {
-            const attempt = simulateTestAttempt(currentLevel, performance);
+            const attempt = simulateTestAttempt(currentLevel, characteristics);
             history.push(attempt);
 
-            // Calculate next level based on performance
             let newLevel = currentLevel;
-            if (attempt.correctCount > 22) {
-                if (attempt.timeRemaining > 60) newLevel += 2;
-                else if (attempt.timeRemaining > 20) newLevel += 1;
-                consecutiveFastTrackCount = 0;
-            } else if (attempt.correctCount >= 20 && attempt.timeRemaining < 20) {
-                consecutiveFastTrackCount += 1;
-                if (consecutiveFastTrackCount >= 3) {
-                    newLevel += 1;
+            // Struggling students have a high chance of not leveling up
+            if (characteristics.performance === 'low' && Math.random() < 0.6) {
+                // No level change
+            } else {
+                 if (attempt.correctCount > 22) {
+                    if (attempt.timeRemaining > 60) newLevel += 2;
+                    else if (attempt.timeRemaining > 20) newLevel += 1;
+                    consecutiveFastTrackCount = 0;
+                } else if (attempt.correctCount >= 20 && attempt.timeRemaining < 20) {
+                    consecutiveFastTrackCount += 1;
+                    if (consecutiveFastTrackCount >= 3) {
+                        newLevel += 1;
+                        consecutiveFastTrackCount = 0;
+                    }
+                } else {
                     consecutiveFastTrackCount = 0;
                 }
-            } else {
-                consecutiveFastTrackCount = 0;
             }
-            currentLevel = Math.min(Math.max(newLevel, 1), 20);
+            currentLevel = Math.min(Math.max(newLevel, 1), 12); // Cap max level at 12
+        }
+
+        // Final check to make sure some students are stuck low
+        if(characteristics.performance === 'low') {
+            currentLevel = Math.min(currentLevel, getRandomInt(1, 4));
         }
 
         db.studentProfiles[studentId] = {
