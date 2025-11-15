@@ -301,11 +301,12 @@ const SchoolSummaryView: React.FC = () => {
                 data: profiles[i]
             })).filter(s => s.data);
 
-            const result = await analyzeSchoolTrends(allStudentsData);
-            setSummary(result);
+            await analyzeSchoolTrends(allStudentsData, (chunk) => {
+              setSummary(prev => prev + chunk);
+            });
         } catch (e) {
             console.error(e);
-            setSummary('Could not generate school summary at this time.');
+            setSummary(prev => prev + '\n\nCould not generate school summary at this time.');
         } finally {
             setIsLoading(false);
         }
@@ -482,6 +483,7 @@ const StudentDetailModal: React.FC<{ student: StudentUser, profile: StudentData 
     useEffect(() => {
         const getSummary = async () => {
             setIsLoading(true);
+            setSummary(''); // Clear previous summary
             if (!profile || !profile.history || profile.history.length === 0) {
                 setSummary("This student has not completed any tests yet. The AI summary will be available after their first attempt.");
                 setIsLoading(false);
@@ -493,9 +495,16 @@ const StudentDetailModal: React.FC<{ student: StudentUser, profile: StudentData 
               return;
             }
 
-            const result = await analyzeStudentHistory(profile.history);
-            setSummary(result);
-            setIsLoading(false);
+            try {
+                await analyzeStudentHistory(profile.history, (chunk) => {
+                    setSummary(prev => prev + chunk);
+                });
+            } catch (error) {
+                console.error(error);
+                setSummary(prev => prev + "\n\nCould not generate analysis at this time.");
+            } finally {
+                setIsLoading(false);
+            }
         };
         getSummary();
     }, [profile]);
@@ -641,8 +650,9 @@ const ClassDetailView: React.FC<{aClass: Class, onBack: () => void}> = ({ aClass
             data: studentProfiles[s.id]
           }))
           .filter(s => s.data); 
-        const trends = await analyzeClassForGroupings(studentDataForClass);
-        setClassGroupings(trends);
+        await analyzeClassForGroupings(studentDataForClass, (chunk) => {
+          setClassGroupings(prev => prev + chunk);
+        });
       } catch (e) {
         console.error(e);
         setClassGroupings("Could not analyze groupings at this time.");
@@ -1215,21 +1225,29 @@ interface ResultsScreenProps {
   onRestart: () => void;
 }
 const ResultsScreen: React.FC<ResultsScreenProps> = ({ attempt, studentHistory, onRestart }) => {
-  const [summary, setSummary] = useState<string>('Analyzing...');
+  const [summary, setSummary] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const getSummary = async () => {
       setIsLoading(true);
+      setSummary(''); // Clear previous summary
       if (studentHistory.reduce((acc, cv) => acc + cv.answeredQuestions.length, 0) < 10) {
         setSummary("Complete a few more tests to unlock detailed, long-term feedback and analysis from the tutor.");
         setIsLoading(false);
         return;
       }
       
-      const result = await analyzeStudentHistory(studentHistory);
-      setSummary(result);
-      setIsLoading(false);
+      try {
+        await analyzeStudentHistory(studentHistory, (chunk) => {
+            setSummary(prev => prev + chunk);
+        });
+      } catch (error) {
+        console.error(error);
+        setSummary(prev => prev + "\n\nCould not generate analysis at this time.");
+      } finally {
+        setIsLoading(false);
+      }
     };
     getSummary();
   }, [studentHistory]);

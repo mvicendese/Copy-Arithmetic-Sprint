@@ -11,12 +11,16 @@ const formatOperands = (operands: (number | RationalNumber)[]): string => {
   }).join(', ');
 };
 
-export async function analyzeStudentHistory(history: TestAttempt[]): Promise<string> {
+export async function analyzeStudentHistory(
+  history: TestAttempt[],
+  onChunk: (chunk: string) => void
+): Promise<void> {
   if (!process.env.API_KEY) {
-    return "Gemini API Key is not configured. Please ensure API_KEY is set in your environment variables.";
+    throw new Error("Gemini API Key is not configured. Please ensure API_KEY is set in your environment variables.");
   }
   if (history.length === 0) {
-    return "No history to analyze.";
+    onChunk("No history to analyze.");
+    return;
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -32,26 +36,30 @@ export async function analyzeStudentHistory(history: TestAttempt[]): Promise<str
     const prompts = await api.getPrompts();
     const finalPrompt = `${prompts.studentAnalysis}\n\nHere is the student's test history:\n${formattedHistory}`;
     
-    const response = await ai.models.generateContent({
+    const response = await ai.models.generateContentStream({
         model: 'gemini-2.5-flash',
         contents: finalPrompt,
     });
-    return response.text;
+    for await (const chunk of response) {
+      onChunk(chunk.text);
+    }
   } catch (error) {
     console.error("Error calling Gemini API:", error);
-    return "There was an error analyzing the student's history. Please try again later.";
+    throw new Error("There was an error analyzing the student's history. Please try again later.");
   }
 }
 
 
 export async function analyzeClassForGroupings(
-  classStudentsData: { studentName: string; data: StudentData }[]
-): Promise<string> {
+  classStudentsData: { studentName: string; data: StudentData }[],
+  onChunk: (chunk: string) => void
+): Promise<void> {
   if (!process.env.API_KEY) {
-    return "Gemini API Key is not configured. Could not analyze class trends.";
+    throw new Error("Gemini API Key is not configured. Could not analyze class trends.");
   }
   if (classStudentsData.length === 0) {
-    return "There are no students in this class to analyze.";
+    onChunk("There are no students in this class to analyze.");
+    return;
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -62,15 +70,21 @@ export async function analyzeClassForGroupings(
             return `Student: ${student.studentName}\n  - No test history yet.`;
         }
         
+        // UPDATED LOGIC: Provide context by including the test level for each incorrect answer.
+        // This allows the AI to understand the difficulty of the question the student missed.
         const wrongAnswersSummary = student.data.history
-            .flatMap(attempt => attempt.answeredQuestions)
-            .filter(q => !q.isCorrect)
-            .map(q => `    - Question: ${q.questionText.replace('\\', '')}, Op: ${q.operationType}, Operands: [${formatOperands(q.operands)}]`)
-            .slice(-5) 
+            .slice(-3) // Look at the three most recent tests
+            .flatMap(attempt => 
+                attempt.answeredQuestions
+                    .filter(q => !q.isCorrect)
+                    .map(q => ({ question: q, level: attempt.level })) // Pass level along
+            )
+            .map(({ question: q, level }) => `    - (On a Level ${level} test) Question: ${q.questionText.replace(/\\/g, '')}, Op: ${q.operationType}, Operands: [${formatOperands(q.operands)}]`)
             .join('\n');
 
+
         if (wrongAnswersSummary.length === 0) {
-            return `Student: ${student.studentName} (Current Level: ${student.data.currentLevel})\n  - No recent incorrect answers found.`;
+            return `Student: ${student.studentName} (Current Level: ${student.data.currentLevel})\n  - No incorrect answers in the last 3 tests.`;
         }
 
         return `Student: ${student.studentName} (Current Level: ${student.data.currentLevel})\n  - Recent Incorrect Answers:\n${wrongAnswersSummary}`;
@@ -81,25 +95,29 @@ export async function analyzeClassForGroupings(
     const prompts = await api.getPrompts();
     const finalPrompt = `${prompts.classAnalysis}\n\nHere is the data of incorrect answers for the class:\n${formattedData}`;
     
-    const response = await ai.models.generateContent({
+    const response = await ai.models.generateContentStream({
       model: 'gemini-2.5-flash',
       contents: finalPrompt,
     });
-    return response.text;
+    for await (const chunk of response) {
+        onChunk(chunk.text);
+    }
   } catch (error) {
     console.error("Error calling Gemini API:", error);
-    return "There was an error analyzing class trends. Please try again later.";
+    throw new Error("There was an error analyzing class trends. Please try again later.");
   }
 }
 
 export async function analyzeSchoolTrends(
-  allStudentsData: { studentName: string; data: StudentData }[]
-): Promise<string> {
+  allStudentsData: { studentName: string; data: StudentData }[],
+  onChunk: (chunk: string) => void
+): Promise<void> {
   if (!process.env.API_KEY) {
-    return "Gemini API Key is not configured. Could not analyze school trends.";
+    throw new Error("Gemini API Key is not configured. Could not analyze school trends.");
   }
   if (allStudentsData.length === 0) {
-    return "There are no students in the school to analyze.";
+    onChunk("There are no students in the school to analyze.");
+    return;
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -116,13 +134,15 @@ export async function analyzeSchoolTrends(
     const prompts = await api.getPrompts();
     const finalPrompt = `${prompts.schoolAnalysis}\n\nHere is the list of all students and their current levels:\n${formattedData}`;
 
-    const response = await ai.models.generateContent({
+    const response = await ai.models.generateContentStream({
       model: 'gemini-2.5-flash',
       contents: finalPrompt,
     });
-    return response.text;
+    for await (const chunk of response) {
+        onChunk(chunk.text);
+    }
   } catch (error) {
     console.error("Error calling Gemini API:", error);
-    return "There was an error analyzing school trends. Please try again later.";
+    throw new Error("There was an error analyzing school trends. Please try again later.");
   }
 }

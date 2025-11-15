@@ -1,47 +1,49 @@
-import { AppDatabase, User, Class, StudentUser, StudentData, TestAttempt, Prompts, AnsweredQuestion } from '../types';
+import { AppDatabase, User, Class, StudentUser, StudentData, TestAttempt, Prompts, AnsweredQuestion, Question } from '../types';
 import { DEFAULT_LEVEL_PARAMS_INT, DEFAULT_LEVEL_PARAMS_FRAC, TOTAL_QUESTIONS } from '../constants';
+import { generateTestQuestions } from './questionService';
 
 // --- INITIAL PROMPTS ---
 const INITIAL_PROMPTS: Prompts = {
     studentAnalysis: `
-    You are an expert data analyst and math tutor. You will be given the complete test history for a student in an arithmetic practice app. Your task is to provide a detailed, insightful, and actionable summary for a teacher.
+    You are an expert math tutor who is extremely good at identifying patterns quickly. You will be given the test history for a student. Your task is to provide a very concise, to-the-point summary for a teacher.
 
-    The data is structured as a series of tests. For each test, you'll see a list of every question answered, the student's answer, whether it was correct, the time taken, the operation type (add, sub, mul, div), and the specific numbers (operands) used in the question.
+    Your entire output should be in markdown and follow this exact format:
 
-    Based on the ENTIRE history, provide a deep analysis covering the following points. Use markdown for clear formatting.
+    **Strengths:**
+    - [Bullet point describing a clear strength, e.g., "Adding numbers without carrying."]
+    - [Another bullet point...]
 
-    1.  **Overall Summary:**
-        *   A brief, high-level overview of the student's progress, strengths, and primary areas for improvement.
+    **Difficulties:**
+    - [Bullet point describing a clear difficulty, e.g., "Subtraction that requires borrowing."]
+    - [Another bullet point, e.g., "Multiplication involving the number 7."]
 
-    2.  **Analysis by Operation:**
-        *   **Addition & Subtraction:**
-            *   How accurate are they with these operations?
-            *   Do they struggle with negative numbers?
-            *   **CRITICAL:** Analyze their performance with numbers near a multiple of 10 (e.g., adding 9, 19, 21; subtracting 8, 18). Do they make common mistakes here? Suggest teaching strategies like "add 10 and subtract 1" if you see this pattern.
-        *   **Multiplication & Division:**
-            *   How accurate are they?
-            *   **CRITICAL:** Identify specific times tables that are causing problems. Look at the operands from incorrect multiplication/division questions. For example, if they consistently miss questions involving 7s or 8s, point this out directly (e.g., "The student needs to practice their 7 and 8 times tables.").
-
-    3.  **Analysis by Number Size:**
-        *   Does the student's accuracy decrease as the numbers get larger (e.g., double-digit vs. single-digit)?
-        *   Are there specific ranges of numbers (e.g., teens) that are problematic?
-
-    4.  **Speed vs. Accuracy:**
-        *   Identify which types of questions they answer fastest and slowest.
-        *   Is there a negative correlation? Are they rushing and making careless errors on simpler problems? Or are they slow but accurate? Provide specific examples.
-
-    Synthesize these points into a comprehensive report for the teacher. Be specific, use examples from the data, and provide concrete, actionable recommendations.
+    **Key Guidelines:**
+    - Be extremely brief. Each bullet point should be a short phrase.
+    - Focus only on the most significant and recurring patterns based on the provided data.
+    - If there are no clear patterns of weakness or strength for a particular operation, state that explicitly. For example: "No discernible pattern in addition mistakes."
+    - Analyze for common issues like:
+        - Addition with/without carrying.
+        - Subtraction with/without borrowing.
+        - Specific multiplication facts (e.g., 7s, 8s, 12s).
+        - Operations with negative numbers.
+    - Do not provide any introductory text, tables, statistics, or concluding remarks. Only output the "Strengths" and "Difficulties" sections.
   `,
     classAnalysis: `
-    You are an expert educational analyst. You are given data on students' recent incorrect answers in an arithmetic test. Your task is to identify common weaknesses and group students to help a teacher form small support groups.
+    You are an expert educational analyst. You are given data on students' recent incorrect answers. For each student, you see their **current level** and a list of their recent mistakes. Crucially, for each mistake, you are also told the **level of the test** on which it occurred.
+
+    Your task is to identify common weaknesses and group students to help a teacher prioritize their time effectively.
+
+    Your analysis MUST consider the context of the error:
+    - A high-level student making a mistake on a difficult, high-level problem needs different attention than a student struggling with foundational concepts well below their current level.
+    - **Prioritize groups of students who are making errors on material that is significantly below their current level.** For example, a Level 8 student making errors on a Level 3 test is a high-priority concern.
 
     Based on the provided data:
-    1.  **Identify Common Weakness Themes:** Look for recurring error patterns across multiple students. Examples could be: specific times tables (e.g., errors in questions involving 7s, 8s), operations with negative numbers, subtraction that requires borrowing, or specific fraction operations.
-    2.  **Group Students:** List the identified themes as clear, bolded markdown headers (e.g., **Difficulty with Negative Numbers**). Under each header, list the names of the students who exhibit that weakness. A student can appear in multiple groups.
-    3.  **Provide Actionable Advice:** For each group, give a brief, concrete suggestion for a small group activity or focus area.
-    4.  **Acknowledge Strong Students:** If any students have no recent errors, list them under a "Confident Students" group who may not need immediate intervention.
+    1.  **Identify Common Weakness Themes:** Look for recurring error patterns. Examples could be: specific times tables, operations with negative numbers, subtraction that requires borrowing, etc.
+    2.  **Group Students:** List the identified themes as clear, bolded markdown headers. Under each header, list the names of the students who exhibit that weakness. If the weakness is particularly concerning (i.e., on low-level material for that student), note it.
+    3.  **Provide Actionable Advice:** For each group, give a brief, concrete suggestion. Tailor the advice based on the context. For a high-level student making an advanced error, suggest "reviewing complex strategies." For a student struggling with basics, suggest "reinforcing foundational skills with manipulatives."
+    4.  **Acknowledge Strong Students:** If any students have no recent errors, list them under a "Confident Students" group.
 
-    Your output should be well-formatted using markdown.
+    Your output should be well-formatted using markdown, logical, and help the teacher understand not just *what* the students' weaknesses are, but *how severe* and contextually important they are.
   `,
     schoolAnalysis: `
     You are an expert data analyst for a school administrator. You are given a list of all students in the school and their current math level in an adaptive arithmetic program. Your task is to provide a high-level executive summary of the school's overall performance.
@@ -76,79 +78,84 @@ interface StudentCharacteristics {
     weaknesses: Weakness[];
 }
 
-// Generates a plausible question reflecting a specific weakness for more targeted AI analysis.
-const generateWeaknessQuestion = (level: number, weakness: Weakness): Pick<AnsweredQuestion, 'questionText' | 'operationType' | 'operands'> => {
-    switch (weakness) {
-        case 'negatives': {
-            const n1 = getRandomInt(-15, -1);
-            const n2 = getRandomInt(1, 15);
-            return { questionText: `${n1} + ${n2}`, operationType: 'add', operands: [n1, n2] };
+// Helper to determine if a question matches a student's weakness profile.
+const isWeaknessQuestion = (question: Question, weaknesses: Weakness[]): boolean => {
+    const opType = question.operationType;
+    const operands = question.operands;
+
+    if (weaknesses.includes('multiplication') && opType === 'mul') return true;
+    if (weaknesses.includes('negatives') && operands.some(op => typeof op === 'number' && op < 0)) return true;
+    
+    // Check for borrow/carry by looking at the units digits of integer operands.
+    if (question.type === 'integer') {
+        if (weaknesses.includes('subtraction_borrow') && opType === 'sub') {
+            const n1 = operands[0] as number;
+            const n2 = operands[1] as number;
+            if (n1 > 0 && n2 > 0 && (n1 % 10) < (n2 % 10)) return true;
         }
-        case 'multiplication': {
-            const hardNumbers = [7, 8, 9, 12];
-            const n1 = hardNumbers[getRandomInt(0, hardNumbers.length - 1)];
-            const n2 = getRandomInt(2, 9);
-            return { questionText: `${n1} \\times ${n2}`, operationType: 'mul', operands: [n1, n2] };
-        }
-        case 'subtraction_borrow': {
-            const n1 = getRandomInt(21, 80);
-            const n2 = getRandomInt(2, 9);
-            if (n1 % 10 < n2) {
-                return { questionText: `${n1} - ${n2}`, operationType: 'sub', operands: [n1, n2] };
-            }
-            const n3 = getRandomInt(11, 18); // fallback
-            return { questionText: `${n1} - ${n3}`, operationType: 'sub', operands: [n1, n3] };
-        }
-        case 'addition_carry': {
-            const n1 = getRandomInt(11, 80);
-            const n2 = getRandomInt(11, 20);
-            if ((n1 % 10) + (n2 % 10) >= 10) {
-                 return { questionText: `${n1} + ${n2}`, operationType: 'add', operands: [n1, n2] };
-            }
-            const n3 = getRandomInt(5,9); // fallback
-            const n4 = getRandomInt(5,9);
-            return { questionText: `${n3} + ${n4}`, operationType: 'add', operands: [n3, n4] };
+        if (weaknesses.includes('addition_carry') && opType === 'add') {
+            const n1 = operands[0] as number;
+            const n2 = operands[1] as number;
+            if (n1 > 0 && n2 > 0 && (n1 % 10) + (n2 % 10) >= 10) return true;
         }
     }
-};
 
-// Simulates a single test attempt, generating history that reflects a student's persona.
+    return false;
+}
+
+// Simulates a single test attempt by generating a real test and then deciding which answers are incorrect based on the student's persona.
 const simulateTestAttempt = (level: number, characteristics: StudentCharacteristics): TestAttempt => {
-    let correctCount = 0;
+    // Generate a realistic, level-appropriate set of questions, just like a real student would see.
+    const testQuestions = generateTestQuestions(level, db.levelParamsInt, db.levelParamsFrac);
+
+    let incorrectCount = 0;
     switch (characteristics.performance) {
-        case 'high': correctCount = getRandomInt(23, 25); break;
-        case 'medium': correctCount = getRandomInt(19, 23); break;
-        case 'low': correctCount = getRandomInt(10, 18); break;
+        case 'high': incorrectCount = getRandomInt(0, 2); break; // High performers make very few mistakes
+        case 'medium': incorrectCount = getRandomInt(2, 6); break;
+        case 'low': incorrectCount = getRandomInt(7, 15); break;
     }
     
-    const answeredQuestions: AnsweredQuestion[] = [];
-    const incorrectCount = TOTAL_QUESTIONS - correctCount;
-    let weaknessErrorsToMake = Math.floor(incorrectCount * 0.7); // 70% of errors should be from specific weaknesses
+    // Identify which of the generated questions align with the student's weaknesses.
+    const allIndices = Array.from({ length: testQuestions.length }, (_, i) => i);
+    const weaknessIndices = allIndices.filter(i => isWeaknessQuestion(testQuestions[i], characteristics.weaknesses));
+    const nonWeaknessIndices = allIndices.filter(i => !weaknessIndices.includes(i));
+    
+    // Helper to shuffle an array
+    const shuffle = (array: number[]) => {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    };
 
-    for(let i = 0; i < TOTAL_QUESTIONS; i++) {
-        const isCorrect = i < correctCount;
-        let questionData: Pick<AnsweredQuestion, 'questionText' | 'operationType' | 'operands'>;
+    const incorrectIndices = new Set<number>();
+    
+    // 70% of errors should come from the student's specific weaknesses, if possible.
+    const numWeaknessErrors = Math.ceil(incorrectCount * 0.7);
 
-        if (!isCorrect && weaknessErrorsToMake > 0 && characteristics.weaknesses.length > 0) {
-            const weakness = characteristics.weaknesses[getRandomInt(0, characteristics.weaknesses.length - 1)];
-            questionData = generateWeaknessQuestion(level, weakness);
-            weaknessErrorsToMake--;
-        } else {
-            // Generic question for correct answers or random errors
-            questionData = {
-                questionText: `Q${i+1}`,
-                operationType: ['add', 'sub', 'mul', 'div'][getRandomInt(0,3)] as 'add' | 'sub' | 'mul' | 'div',
-                operands: [getRandomInt(1, 20), getRandomInt(1,20)],
-            };
-        }
+    const weaknessErrors = shuffle(weaknessIndices).slice(0, numWeaknessErrors);
+    weaknessErrors.forEach(i => incorrectIndices.add(i));
 
-        answeredQuestions.push({
-            ...questionData,
-            submittedAnswer: isCorrect ? 'correct' : 'incorrect',
+    // Fill the remaining errors with random other questions.
+    const remainingErrors = incorrectCount - incorrectIndices.size;
+    const randomErrors = shuffle(nonWeaknessIndices).slice(0, remainingErrors);
+    randomErrors.forEach(i => incorrectIndices.add(i));
+
+    // Create the final list of answered questions for the test attempt.
+    const answeredQuestions: AnsweredQuestion[] = testQuestions.map((q, i) => {
+        const isCorrect = !incorrectIndices.has(i);
+        return {
+            questionText: q.text,
+            operationType: q.operationType,
+            operands: q.operands,
+            submittedAnswer: isCorrect ? 'correct' : 'incorrect', // Simplified for simulation
             isCorrect: isCorrect,
-            timeTakenSeconds: getRandomInt(5, 15),
-        });
-    }
+            timeTakenSeconds: getRandomInt(5, 12) + (isCorrect ? 0 : getRandomInt(4, 10)), // Take longer on incorrect ones
+        };
+    });
+
+    const correctCount = answeredQuestions.filter(q => q.isCorrect).length;
 
     return {
         date: new Date().toISOString(),
@@ -159,6 +166,7 @@ const simulateTestAttempt = (level: number, characteristics: StudentCharacterist
         answeredQuestions
     };
 };
+
 
 const seedDatabase = () => {
     // Clear existing data
@@ -202,14 +210,13 @@ const seedDatabase = () => {
     const studentPersonas: Record<string, StudentCharacteristics> = {};
     studentRegistry.forEach((studentId, i) => {
       const mod = i % 10;
-      if (mod < 2) { // 20% are high performers
-        studentPersonas[studentId] = { performance: 'high', weaknesses: [] };
-      } else if (mod < 4) { // 20% are struggling students
+      if (mod < 3) { // 30% are high performers. Give them a minor, high-level weakness.
+        studentPersonas[studentId] = { performance: 'high', weaknesses: [Math.random() < 0.5 ? 'multiplication' : 'negatives'] };
+      } else if (mod < 5) { // 20% are struggling students with foundational issues.
         studentPersonas[studentId] = { performance: 'low', weaknesses: ['addition_carry', 'subtraction_borrow'] };
-      } else if (mod < 7) { // 30% are average with a specific weakness
-         studentPersonas[studentId] = { performance: 'medium', weaknesses: ['multiplication'] };
-      } else { // 30% are average with another weakness
-         studentPersonas[studentId] = { performance: 'medium', weaknesses: ['negatives'] };
+      } else { // 50% are average students with a specific weakness.
+         const weaknesses: Weakness[] = ['multiplication', 'negatives'];
+         studentPersonas[studentId] = { performance: 'medium', weaknesses: [weaknesses[i % weaknesses.length]] };
       }
     });
 
