@@ -5,20 +5,13 @@ export interface RationalNumber {
   den: number;
 }
 
-export interface QuestionFeatures {
-  operation: 'add' | 'sub' | 'mul' | 'div';
-  operandSizeCategory: 'single-digit' | 'double-digit' | 'mixed-digits' | 'fractions';
-  requiresCarryOrBorrow: boolean;
-}
-
-
 export interface Question {
   id: string;
   text: string;
   type: QuestionType;
   answer: number | RationalNumber;
+  operationType: 'add' | 'sub' | 'mul' | 'div';
   operands: (number | RationalNumber)[];
-  features: QuestionFeatures;
 }
 
 export interface AnsweredQuestion {
@@ -26,15 +19,7 @@ export interface AnsweredQuestion {
   submittedAnswer: string;
   isCorrect: boolean;
   timeTakenSeconds: number;
-  
-  // New dimensional data
-  features: QuestionFeatures & {
-    questionIndex: number; // Position in the test (0-24)
-    timeIntoTestSeconds: number; // How far into the test they were
-    testIndex: number; // Which test number this was for the student
-  };
-  
-  // Kept for specific AI analysis if needed
+  operationType: 'add' | 'sub' | 'mul' | 'div';
   operands: (number | RationalNumber)[];
 }
 

@@ -4,33 +4,33 @@ import { DEFAULT_LEVEL_PARAMS_INT, DEFAULT_LEVEL_PARAMS_FRAC, TOTAL_QUESTIONS } 
 // --- INITIAL PROMPTS ---
 const INITIAL_PROMPTS: Prompts = {
     studentAnalysis: `
-    You are an expert data analyst and math tutor. You will be given the complete test history for a student. Your task is to provide a detailed, insightful, and actionable summary for a teacher.
+    You are an expert data analyst and math tutor. You will be given the complete test history for a student in an arithmetic practice app. Your task is to provide a detailed, insightful, and actionable summary for a teacher.
 
-    The data for each question is now highly structured. Instead of just the question text, you get a 'features' object with key analytical dimensions.
+    The data is structured as a series of tests. For each test, you'll see a list of every question answered, the student's answer, whether it was correct, the time taken, the operation type (add, sub, mul, div), and the specific numbers (operands) used in the question.
 
-    - \`isCorrect\`: boolean
-    - \`timeTakenSeconds\`: number
-    - \`features\`:
-        - \`operation\`: 'add', 'sub', 'mul', 'div'
-        - \`operandSizeCategory\`: 'single-digit', 'double-digit', 'mixed-digits', or 'fractions'
-        - \`requiresCarryOrBorrow\`: boolean (CRITICALLY IMPORTANT - this is true for additions that need to carry over, or subtractions that need to borrow)
-        - \`questionIndex\`: The question number in the test (0-24)
-        - \`timeIntoTestSeconds\`: How many seconds into the test this question was answered.
+    Based on the ENTIRE history, provide a deep analysis covering the following points. Use markdown for clear formatting.
 
-    Based on the ENTIRE history, provide a deep analysis. Use markdown for clear formatting.
+    1.  **Overall Summary:**
+        *   A brief, high-level overview of the student's progress, strengths, and primary areas for improvement.
 
-    1.  **Overall Summary:** A brief, high-level overview of the student's progress, strengths, and primary areas for improvement.
+    2.  **Analysis by Operation:**
+        *   **Addition & Subtraction:**
+            *   How accurate are they with these operations?
+            *   Do they struggle with negative numbers?
+            *   **CRITICAL:** Analyze their performance with numbers near a multiple of 10 (e.g., adding 9, 19, 21; subtracting 8, 18). Do they make common mistakes here? Suggest teaching strategies like "add 10 and subtract 1" if you see this pattern.
+        *   **Multiplication & Division:**
+            *   How accurate are they?
+            *   **CRITICAL:** Identify specific times tables that are causing problems. Look at the operands from incorrect multiplication/division questions. For example, if they consistently miss questions involving 7s or 8s, point this out directly (e.g., "The student needs to practice their 7 and 8 times tables.").
 
-    2.  **Conceptual Gaps Analysis:**
-        *   **CRITICAL:** Analyze their performance on questions where \`requiresCarryOrBorrow\` is \`true\`. This is a major indicator of foundational understanding. Do they consistently get these wrong or take much longer? Highlight this as a key area for intervention.
-        *   **Operations:** Which operations are weakest? Correlate this with other features. Do they struggle with subtraction specifically when it requires borrowing?
-        *   **Number Size:** Does accuracy decrease when \`operandSizeCategory\` is 'double-digit' or 'mixed-digits'?
+    3.  **Analysis by Number Size:**
+        *   Does the student's accuracy decrease as the numbers get larger (e.g., double-digit vs. single-digit)?
+        *   Are there specific ranges of numbers (e.g., teens) that are problematic?
 
-    3.  **Performance & Focus Analysis:**
-        *   **Speed vs. Accuracy:** Is there a pattern? Are they rushing and making mistakes on easy questions? Are they slow but accurate?
-        *   **Fatigue/Focus:** Analyze their performance based on \`questionIndex\` or \`timeIntoTestSeconds\`. Does their accuracy drop significantly towards the end of a test? This could indicate a focus or stamina issue.
+    4.  **Speed vs. Accuracy:**
+        *   Identify which types of questions they answer fastest and slowest.
+        *   Is there a negative correlation? Are they rushing and making careless errors on simpler problems? Or are they slow but accurate? Provide specific examples.
 
-    Synthesize these points into a comprehensive report. Be specific, use the feature data to back up your claims, and provide concrete, actionable recommendations. For example: "The student's accuracy drops from 90% to 40% on subtraction questions that require borrowing. This suggests a need for targeted practice with regrouping."
+    Synthesize these points into a comprehensive report for the teacher. Be specific, use examples from the data, and provide concrete, actionable recommendations.
   `,
     classAnalysis: `
     You are an expert educational analyst. You are given data on students' recent incorrect answers in an arithmetic test. Your task is to identify common weaknesses and group students to help a teacher form small support groups.
@@ -71,7 +71,7 @@ const db: AppDatabase = {
 const getRandomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 
 // Simulates a single test attempt for a student to generate history
-const simulateTestAttempt = (level: number, performance: 'high' | 'medium' | 'low', testIndex: number): TestAttempt => {
+const simulateTestAttempt = (level: number, performance: 'high' | 'medium' | 'low'): TestAttempt => {
     let correctCount = 0;
     switch (performance) {
         case 'high':
@@ -85,30 +85,17 @@ const simulateTestAttempt = (level: number, performance: 'high' | 'medium' | 'lo
             break;
     }
     
+    // Generate some dummy answered questions, especially incorrect ones for the AI to analyze.
     const answeredQuestions: AnsweredQuestion[] = [];
-    let timeIntoTestSeconds = 0;
     for(let i = 0; i < TOTAL_QUESTIONS; i++) {
         const isCorrect = i < correctCount;
-        const timeTakenSeconds = getRandomInt(5, 15);
-        timeIntoTestSeconds += timeTakenSeconds;
-
-        const operation = ['add', 'sub', 'mul', 'div'][getRandomInt(0,3)] as 'add' | 'sub' | 'mul' | 'div';
-        const requiresCarryOrBorrow = (operation === 'add' || operation === 'sub') && Math.random() < 0.4;
-
         answeredQuestions.push({
-            questionText: `Q${i+1} (Simulated)`,
+            questionText: `Q${i+1}`,
             submittedAnswer: isCorrect ? 'correct' : 'incorrect',
             isCorrect: isCorrect,
-            timeTakenSeconds: timeTakenSeconds,
+            timeTakenSeconds: getRandomInt(5, 15),
+            operationType: ['add', 'sub', 'mul', 'div'][getRandomInt(0,3)] as 'add' | 'sub' | 'mul' | 'div',
             operands: [getRandomInt(1, 20), getRandomInt(1,20)],
-            features: {
-                operation: operation,
-                operandSizeCategory: Math.random() < 0.5 ? 'single-digit' : 'mixed-digits',
-                requiresCarryOrBorrow,
-                questionIndex: i,
-                timeIntoTestSeconds,
-                testIndex,
-            }
         })
     }
 
@@ -176,7 +163,7 @@ const seedDatabase = () => {
         const numTests = getRandomInt(10, 20);
 
         for (let i = 0; i < numTests; i++) {
-            const attempt = simulateTestAttempt(currentLevel, performance, i);
+            const attempt = simulateTestAttempt(currentLevel, performance);
             history.push(attempt);
 
             // Calculate next level based on performance

@@ -1,21 +1,15 @@
 import { GoogleGenAI } from "@google/genai";
-import { StudentData, TestAttempt, RationalNumber, AnsweredQuestion } from '../types';
+import { StudentData, TestAttempt, RationalNumber } from '../types';
 import * as api from './mockService';
 
 declare const process: { env: { API_KEY?: string } };
 
-const formatFeaturesForPrompt = (q: AnsweredQuestion): string => {
-    const { features, timeTakenSeconds, isCorrect } = q;
-    // We don't need to send all features, just the ones for analysis.
-    const analysisFeatures = {
-        operation: features.operation,
-        operandSizeCategory: features.operandSizeCategory,
-        requiresCarryOrBorrow: features.requiresCarryOrBorrow,
-        questionIndex: features.questionIndex,
-        timeIntoTestSeconds: features.timeIntoTestSeconds,
-    };
-    return `- Correct: ${isCorrect}, Time: ${timeTakenSeconds}s, Features: ${JSON.stringify(analysisFeatures)}`;
-}
+const formatOperands = (operands: (number | RationalNumber)[]): string => {
+  return operands.map(op => {
+    if (typeof op === 'number') return op.toString();
+    return `${op.num}/${op.den}`;
+  }).join(', ');
+};
 
 export async function analyzeStudentHistory(history: TestAttempt[]): Promise<string> {
   if (!process.env.API_KEY) {
@@ -28,7 +22,9 @@ export async function analyzeStudentHistory(history: TestAttempt[]): Promise<str
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const formattedHistory = history.map((attempt, index) => {
-    const questionsSummary = attempt.answeredQuestions.map(formatFeaturesForPrompt).join('\n');
+    const questionsSummary = attempt.answeredQuestions.map(q => 
+      `- Q: "${q.questionText.replace(' = ?', '')}", Ans: "${q.submittedAnswer}", Correct: ${q.isCorrect}, Time: ${q.timeTakenSeconds}s, Op: ${q.operationType}, Operands: [${formatOperands(q.operands)}]`
+    ).join('\n');
     return `Test ${index + 1} (Level ${attempt.level}):\n${questionsSummary}`;
   }).join('\n\n');
 
@@ -47,12 +43,6 @@ export async function analyzeStudentHistory(history: TestAttempt[]): Promise<str
   }
 }
 
-const formatOperands = (operands: (number | RationalNumber)[]): string => {
-  return operands.map(op => {
-    if (typeof op === 'number') return op.toString();
-    return `${op.num}/${op.den}`;
-  }).join(', ');
-};
 
 export async function analyzeClassForGroupings(
   classStudentsData: { studentName: string; data: StudentData }[]
@@ -75,7 +65,7 @@ export async function analyzeClassForGroupings(
         const wrongAnswersSummary = student.data.history
             .flatMap(attempt => attempt.answeredQuestions)
             .filter(q => !q.isCorrect)
-            .map(q => `    - Question: ${q.questionText.replace('\\', '')}, Op: ${q.features.operation}, Operands: [${formatOperands(q.operands)}]`)
+            .map(q => `    - Question: ${q.questionText.replace('\\', '')}, Op: ${q.operationType}, Operands: [${formatOperands(q.operands)}]`)
             .slice(-5) 
             .join('\n');
 
