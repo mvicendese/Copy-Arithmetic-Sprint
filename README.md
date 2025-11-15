@@ -36,13 +36,12 @@ The local mock database is pre-populated with the following users:
 -   **Admin:**
     -   Username: `admin@sprint.com`
     -   Password: `admin`
--   **Teacher:**
-    -   Username: `ada@sprint.com`
-    -   Password: `password`
+-   **Teachers:**
+    -   Username format: `teach[A-C]@sprint.com` (e.g., `teachA@sprint.com`, `teachB@sprint.com`)
+    -   Password: `password` (for all teachers)
 -   **Students:**
-    -   Username: `john.doe` / Password: `password`
-    -   Username: `jane.smith` / Password: `password` (Account is initially locked)
-    -   Username: `peter.jones` / Password: `password`
+    -   Username format: `student.[TeacherChar][ClassChar][Number]` (e.g., `student.aa1`, `student.ab15`, `student.cc5`)
+    -   Password: `password` (for all students)
 
 ## Note on Gemini API
 
