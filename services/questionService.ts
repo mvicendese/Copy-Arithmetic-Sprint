@@ -1,4 +1,4 @@
-import { Question, RationalNumber } from '../types';
+import { Question, RationalNumber, QuestionFeatures } from '../types';
 import { TOTAL_QUESTIONS } from '../constants';
 
 // --- Math Helpers ---
@@ -21,9 +21,7 @@ const getRandomInt = (min: number, max: number): number => {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 };
 
-// NEW HELPER to avoid generating zeros for addition/subtraction
 const getRandomNonZeroInt = (min: number, max: number): number => {
-    // If the range doesn't include 0, or is only 0, no special logic needed
     if (min > 0 || max < 0 || (min === 0 && max === 0)) {
         return getRandomInt(min, max);
     }
@@ -36,43 +34,118 @@ const getRandomNonZeroInt = (min: number, max: number): number => {
 };
 
 
+// --- Feature Extraction Helpers ---
+
+const requiresCarry = (n1: number, n2: number): boolean => {
+    if (!Number.isInteger(n1) || !Number.isInteger(n2)) return false;
+    // Simplification: only check for positive numbers for now
+    if (n1 < 0 || n2 < 0) return false;
+
+    let s1 = String(n1);
+    let s2 = String(n2);
+    let carry = 0;
+    let i = s1.length - 1;
+    let j = s2.length - 1;
+
+    while (i >= 0 || j >= 0 || carry > 0) {
+        const d1 = i >= 0 ? parseInt(s1[i--]) : 0;
+        const d2 = j >= 0 ? parseInt(s2[j--]) : 0;
+        const sum = d1 + d2 + carry;
+        if (sum >= 10 && (i >= -1 || j >= -1)) { // check if not on the very last digit
+            return true;
+        }
+        carry = Math.floor(sum / 10);
+    }
+    return false;
+}
+
+const requiresBorrow = (n1: number, n2: number): boolean => {
+    if (!Number.isInteger(n1) || !Number.isInteger(n2)) return false;
+    // Simplification: only check for standard n1 > n2 > 0 cases
+    if (n1 < n2 || n1 < 0 || n2 < 0) return false;
+    
+    let s1 = String(n1);
+    let s2 = String(n2);
+    let i = s1.length - 1;
+    let j = s2.length - 1;
+    
+    while (j >= 0) {
+        const d1 = parseInt(s1[i--]);
+        const d2 = parseInt(s2[j--]);
+        if (d1 < d2) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const getOperandSizeCategory = (operands: (number | RationalNumber)[]): QuestionFeatures['operandSizeCategory'] => {
+    const isNumber = (op: any): op is number => typeof op === 'number';
+    if (!operands.every(isNumber)) return 'fractions';
+    
+    const numOps = operands as number[];
+    const isSingle = (n: number) => Math.abs(n) < 10;
+    
+    if (numOps.every(isSingle)) return 'single-digit';
+    if (numOps.every(n => !isSingle(n))) return 'double-digit';
+    return 'mixed-digits';
+}
+
+
 // --- Question Generation based on Python script ---
 
 const addInteger = (params: number[]): Omit<Question, 'id'> => {
-    // UPDATED: Use getRandomNonZeroInt to prevent adding by zero
     const n1 = getRandomNonZeroInt(params[3], params[4]);
     const n2 = getRandomNonZeroInt(params[3], params[4]);
     const answer = n1 + n2;
-    return { text: `${n1} + ${n2}`, type: 'integer', answer, operationType: 'add', operands: [n1, n2] };
+    return { 
+        text: `${n1} + ${n2}`, type: 'integer', answer, operands: [n1, n2],
+        features: {
+            operation: 'add',
+            operandSizeCategory: getOperandSizeCategory([n1, n2]),
+            requiresCarryOrBorrow: requiresCarry(n1, n2),
+        }
+    };
 };
 
 const subtractInteger = (level: number, params: number[]): Omit<Question, 'id'> => {
-    // UPDATED: Use getRandomNonZeroInt to prevent subtracting by zero
     let n1 = getRandomNonZeroInt(params[5], params[6]);
     let n2 = getRandomNonZeroInt(params[5], params[6]);
-    
+    let text: string;
+    let answer: number;
+    let finalN1: number, finalN2: number;
+
     if (level < 6) {
-        // This logic ensures a positive result where the answer is one of the original numbers
         const originalN1 = n1;
-        n1 = n1 + n2;
-        const answer = originalN1;
-        return { text: `${n1} - ${n2}`, type: 'integer', answer, operationType: 'sub', operands: [n1, n2] };
+        finalN1 = n1 + n2;
+        finalN2 = n2;
+        answer = originalN1;
+        text = `${finalN1} - ${finalN2}`;
+    } else {
+        finalN1 = n1;
+        finalN2 = n2;
+        answer = n1 - n2;
+        text = `${n1} - ${n2}`;
     }
     
-    const answer = n1 - n2;
-    return { text: `${n1} - ${n2}`, type: 'integer', answer, operationType: 'sub', operands: [n1, n2] };
+    return { 
+        text, type: 'integer', answer, operands: [finalN1, finalN2],
+        features: {
+            operation: 'sub',
+            operandSizeCategory: getOperandSizeCategory([finalN1, finalN2]),
+            requiresCarryOrBorrow: requiresBorrow(finalN1, finalN2),
+        }
+    };
 };
 
 const multiplyInteger = (params: number[]): Omit<Question, 'id'> => {
     let n1 = getRandomInt(params[7], params[8]);
     let n2 = getRandomInt(params[7], params[8]);
 
-    // UPDATED: Reduce the chance of multiplying by 1 or -1 to make it rare
     if (Math.abs(n1) === 1 || Math.abs(n2) === 1) {
-        if (Math.random() < 0.75) { // 75% chance to reroll
+        if (Math.random() < 0.75) {
             const min = params[7];
             const max = params[8];
-            // Ensure reroll is possible and won't be an infinite loop
             if (max > min) {
                  do {
                     n1 = getRandomInt(min, max);
@@ -83,16 +156,22 @@ const multiplyInteger = (params: number[]): Omit<Question, 'id'> => {
     }
 
     const answer = n1 * n2;
-    return { text: `${n1} \\times ${n2}`, type: 'integer', answer, operationType: 'mul', operands: [n1, n2] };
+    return { 
+        text: `${n1} \\times ${n2}`, type: 'integer', answer, operands: [n1, n2],
+        features: {
+            operation: 'mul',
+            operandSizeCategory: getOperandSizeCategory([n1, n2]),
+            requiresCarryOrBorrow: false, // Not applicable
+        }
+    };
 };
 
 const divideInteger = (level: number, params: number[]): Omit<Question, 'id'> => {
     const y = (Math.random() < 0.45 && level > 5) ? -1 : 1;
     let bBase = getRandomInt(1, params[10]);
     
-    // UPDATED: Reduce the chance of dividing by 1 or -1
-    if (bBase === 1 && params[10] > 1) { // Check if rerolling is possible
-        if (Math.random() < 0.75) { // 75% chance to reroll
+    if (bBase === 1 && params[10] > 1) {
+        if (Math.random() < 0.75) {
             do {
                 bBase = getRandomInt(1, params[10]);
             } while (bBase === 1);
@@ -103,7 +182,14 @@ const divideInteger = (level: number, params: number[]): Omit<Question, 'id'> =>
     const n1 = bBase * params[11] * randInt;
     const n2 = bBase * y;
     const answer = Math.floor(n1 / n2);
-    return { text: `${n1} \\div ${n2}`, type: 'integer', answer, operationType: 'div', operands: [n1, n2] };
+    return { 
+        text: `${n1} \\div ${n2}`, type: 'integer', answer, operands: [n1, n2],
+        features: {
+            operation: 'div',
+            operandSizeCategory: getOperandSizeCategory([n1, n2]),
+            requiresCarryOrBorrow: false, // Not applicable
+        }
+    };
 };
 
 const generateFraction = (max: number): RationalNumber => {
@@ -112,13 +198,29 @@ const generateFraction = (max: number): RationalNumber => {
     return { num, den };
 };
 
+const createFractionQuestion = (
+    op: 'add' | 'sub' | 'mul' | 'div', 
+    text: string, 
+    answer: RationalNumber, 
+    operands: RationalNumber[]
+): Omit<Question, 'id'> => ({
+    text, type: 'rational', answer, operands,
+    features: {
+        operation: op,
+        operandSizeCategory: 'fractions',
+        requiresCarryOrBorrow: false, // Not applicable
+    }
+});
+
+
 const addFraction = (params: number[]): Omit<Question, 'id'> => {
     const max = params[4];
     const r1 = generateFraction(max);
     const r2 = generateFraction(max);
     const result = { num: r1.num * r2.den + r2.num * r1.den, den: r1.den * r2.den };
     const answer = simplifyFraction(result);
-    return { text: `\\frac{${r1.num}}{${r1.den}} + \\frac{${r2.num}}{${r2.den}}`, type: 'rational', answer, operationType: 'add', operands: [r1, r2] };
+    const text = `\\frac{${r1.num}}{${r1.den}} + \\frac{${r2.num}}{${r2.den}}`;
+    return createFractionQuestion('add', text, answer, [r1, r2]);
 };
 
 const subtractFraction = (params: number[]): Omit<Question, 'id'> => {
@@ -127,7 +229,8 @@ const subtractFraction = (params: number[]): Omit<Question, 'id'> => {
     const r2 = generateFraction(max);
     const result = { num: r1.num * r2.den - r2.num * r1.den, den: r1.den * r2.den };
     const answer = simplifyFraction(result);
-    return { text: `\\frac{${r1.num}}{${r1.den}} - \\frac{${r2.num}}{${r2.den}}`, type: 'rational', answer, operationType: 'sub', operands: [r1, r2] };
+    const text = `\\frac{${r1.num}}{${r1.den}} - \\frac{${r2.num}}{${r2.den}}`;
+    return createFractionQuestion('sub', text, answer, [r1, r2]);
 };
 
 const multiplyFraction = (params: number[]): Omit<Question, 'id'> => {
@@ -136,7 +239,8 @@ const multiplyFraction = (params: number[]): Omit<Question, 'id'> => {
     const r2 = generateFraction(max);
     const result = { num: r1.num * r2.num, den: r1.den * r2.den };
     const answer = simplifyFraction(result);
-    return { text: `\\frac{${r1.num}}{${r1.den}} \\times \\frac{${r2.num}}{${r2.den}}`, type: 'rational', answer, operationType: 'mul', operands: [r1, r2] };
+    const text = `\\frac{${r1.num}}{${r1.den}} \\times \\frac{${r2.num}}{${r2.den}}`;
+    return createFractionQuestion('mul', text, answer, [r1, r2]);
 };
 
 const divideFraction = (params: number[]): Omit<Question, 'id'> => {
@@ -145,8 +249,10 @@ const divideFraction = (params: number[]): Omit<Question, 'id'> => {
     const r2 = generateFraction(max);
     const result = { num: r1.num * r2.den, den: r1.den * r2.num };
     const answer = simplifyFraction(result);
-    return { text: `\\frac{${r1.num}}{${r1.den}} \\div \\frac{${r2.num}}{${r2.den}}`, type: 'rational', answer, operationType: 'div', operands: [r1, r2] };
+    const text = `\\frac{${r1.num}}{${r1.den}} \\div \\frac{${r2.num}}{${r2.den}}`;
+    return createFractionQuestion('div', text, answer, [r1, r2]);
 };
+
 
 const generateSingleQuestion = (level: number, levelParamsInt: number[][], levelParamsFrac: number[][]): Question => {
     let questionData: Omit<Question, 'id'>;
@@ -183,18 +289,14 @@ const generateSingleQuestion = (level: number, levelParamsInt: number[][], level
   return { id: crypto.randomUUID(), ...questionData };
 };
 
-// NEW HELPER: Generates a unique key for a question to detect duplicates and commutative equivalents.
 const getQuestionKey = (q: Question): string => {
-    const op = q.operationType;
-    // Standardize operand representation for the key
+    const op = q.features.operation;
     const operandsAsStrings = q.operands.map(o => {
         if (typeof o === 'number') return o.toString();
-        // Simplify fraction before creating key to handle e.g. 2/4 vs 1/2
         const simplified = simplifyFraction(o);
         return `${simplified.num}/${simplified.den}`;
     });
 
-    // For commutative operations, sort operands to treat 'a+b' and 'b+a' as the same.
     if (op === 'add' || op === 'mul') {
         operandsAsStrings.sort();
     }
@@ -202,12 +304,11 @@ const getQuestionKey = (q: Question): string => {
 }
 
 
-// NEW EXPORTED FUNCTION: Generates a full, unique set of test questions.
 export const generateTestQuestions = (level: number, levelParamsInt: number[][], levelParamsFrac: number[][]): Question[] => {
     const questions: Question[] = [];
     const keys = new Set<string>();
     
-    const maxAttempts = TOTAL_QUESTIONS * 15; // Safeguard against infinite loops
+    const maxAttempts = TOTAL_QUESTIONS * 15;
     let attempts = 0;
 
     while (questions.length < TOTAL_QUESTIONS && attempts < maxAttempts) {
@@ -223,7 +324,6 @@ export const generateTestQuestions = (level: number, levelParamsInt: number[][],
 
     if (questions.length < TOTAL_QUESTIONS) {
         console.warn(`Could not generate ${TOTAL_QUESTIONS} unique questions for level ${level}. Generated ${questions.length}. Filling with non-unique questions.`);
-        // Fill the rest with non-unique questions if the question variety for the level is too small.
         while (questions.length < TOTAL_QUESTIONS) {
              questions.push(generateSingleQuestion(level, levelParamsInt, levelParamsFrac));
         }

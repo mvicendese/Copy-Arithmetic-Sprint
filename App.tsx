@@ -789,6 +789,7 @@ const StudentView: React.FC<{ currentUser: StudentUser }> = ({ currentUser }) =>
         onComplete={handleTestComplete} 
         levelParamsInt={levelParams.levelParamsInt}
         levelParamsFrac={levelParams.levelParamsFrac}
+        testIndex={studentData.history.length}
     />;
   }
 
@@ -972,9 +973,10 @@ interface TestScreenProps {
   onComplete: (attempt: TestAttempt) => void;
   levelParamsInt: number[][];
   levelParamsFrac: number[][];
+  testIndex: number;
 }
 
-const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsInt, levelParamsFrac }) => {
+const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsInt, levelParamsFrac, testIndex }) => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(TEST_DURATION_SECONDS);
@@ -986,12 +988,14 @@ const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsI
   const [activeInput, setActiveInput] = useState<'int' | 'num' | 'den'>('int');
 
   const questionStartTimeRef = useRef<number>(Date.now());
+  const timeIntoTestRef = useRef<number>(0);
 
   useEffect(() => {
     const newQuestions = generateTestQuestions(level, levelParamsInt, levelParamsFrac);
     setQuestions(newQuestions);
     setAnsweredQuestions([]);
     questionStartTimeRef.current = Date.now();
+    timeIntoTestRef.current = 0;
 
     if (newQuestions[0]?.type === 'integer') {
         setActiveInput('int');
@@ -1016,6 +1020,7 @@ const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsI
       let isCorrect = false;
       let submittedAnswer = '';
       const timeTakenSeconds = Math.round((Date.now() - startTime) / 1000);
+      timeIntoTestRef.current += timeTakenSeconds;
 
       if (question.type === 'integer') {
           isCorrect = parseInt(intAns) === question.answer;
@@ -1031,10 +1036,15 @@ const TestScreen: React.FC<TestScreenProps> = ({ level, onComplete, levelParamsI
           submittedAnswer, 
           isCorrect, 
           timeTakenSeconds,
-          operationType: question.operationType,
           operands: question.operands,
+          features: {
+            ...question.features,
+            questionIndex: currentQuestionIndex,
+            timeIntoTestSeconds: timeIntoTestRef.current,
+            testIndex: testIndex,
+          }
       };
-  }, []);
+  }, [currentQuestionIndex, testIndex]);
 
   const endTest = useCallback((finalAnswers: AnsweredQuestion[]) => {
     const correctCount = finalAnswers.filter(r => r.isCorrect).length;
