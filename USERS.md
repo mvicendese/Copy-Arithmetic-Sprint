@@ -1,33 +1,27 @@
 # Arithmetic Sprint - User Guide
 
-This document lists the pre-populated user accounts available for testing the application and explains how to log in.
+This document provides login information for the pre-populated user accounts in the application's in-memory database.
 
-## User Accounts for Testing
+**Note:** Because this is a demo with an in-memory database, any new users you create will be lost when the page is reloaded.
 
-The local mock database is pre-populated with the following users:
-
-### Admin
+## Administrator Account
 
 -   **Username:** `admin@sprint.com`
 -   **Password:** `admin`
 
-### Teachers
+## Teacher Accounts
 
-There are three teachers created, following a simple naming convention.
+There are three pre-populated teachers.
 
--   **Username format:** `teach[A-C]@sprint.com`
-    -   Example 1: `teachA@sprint.com`
-    -   Example 2: `teachB@sprint.com`
-    -   Example 3: `teachC@sprint.com`
+-   **Username:** `teachA@sprint.com`, `teachB@sprint.com`, `teachC@sprint.com`
 -   **Password:** `password` (for all teachers)
 
-### Students
+## Student Accounts
 
-There are 15 students per class, with three classes per teacher. The username is derived from their name, which follows a pattern based on their teacher and class.
+There are 15 students per class, for 9 classes total. The username format is `student.<surname>`. The login system automatically converts the format to `firstname.surname` (e.g. `student.aa1`).
 
--   **Username format:** `student.[TeacherChar][ClassChar][Number]`
-    -   To log in, use the student's first name and surname separated by a period.
-    -   Example 1 (Teacher A, Class a, Student 1): `student.aa1`
-    -   Example 2 (Teacher B, Class c, Student 12): `student.bc12`
-    -   Example 3 (Teacher C, Class a, Student 5): `student.ca5`
+-   **Examples:**
+    -   `student.aa1`
+    -   `student.ab5`
+    -   `student.cc12`
 -   **Password:** `password` (for all students)

@@ -28,3 +28,21 @@ Update the README file to include login instructions for the newly generated dat
 
 **AI adjust code to:**
 Modified `README.md` to add a "User Accounts for Testing" section, detailing the username and password conventions for the new admin, teacher, and student accounts.
+
+---
+
+**Time and date:** 2024-07-25 10:15 AM
+**Developer requested:**
+Switch from the temporary in-memory mock database to the persistent Firebase backend to allow data to be saved between sessions.
+
+**AI adjust code to:**
+Update the application to use Firebase for all data operations. This involved changing the main API import in `App.tsx` from `mockService.ts` to `firebaseService.ts`. Updated all documentation (`README.md`, `DEPLOYMENT.md`, `USERS.md`) to reflect the new persistent storage and provide detailed setup instructions for Firebase, including how to create the initial admin user.
+
+---
+
+**Time and date:** 2024-07-25 10:20 AM
+**Developer requested:**
+Remove the Firebase backend implementation and revert to the in-memory mock database because the Firebase integration was causing issues.
+
+**AI adjust code to:**
+Reverted the application's data layer back to using `mockService.ts`. This involved changing the API import in `App.tsx` and updating all related documentation (`README.md`, `DEPLOYMENT.md`, `USERS.md`) to remove references to Firebase and reflect the behavior of the in-memory mock database.

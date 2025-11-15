@@ -1,6 +1,11 @@
 # Arithmetic Sprint - Deployment Guide
 
-This guide provides instructions for setting up and running the Arithmetic Sprint application in a local development environment.
+This guide provides instructions for setting up and running the Arithmetic Sprint application locally.
+
+## Prerequisites
+
+-   Node.js (v18 or later recommended)
+-   npm (usually comes with Node.js)
 
 ## How to Run the Application
 
@@ -19,6 +24,5 @@ This guide provides instructions for setting up and running the Arithmetic Sprin
 3.  **Open in Browser:**
     The terminal will show a local URL, usually `http://localhost:5173`. Open this URL in your web browser to use the application.
 
-## Note on Gemini API
-
-The features for analyzing student and class performance rely on the Google Gemini API. For these features to work, the application expects an API key to be available in its environment. Please refer to the official documentation for your execution environment on how to provide this.
+## AI Analysis Features
+The AI analysis features require a Google Gemini API key. Please refer to the official documentation for your execution environment on how to provide this key.

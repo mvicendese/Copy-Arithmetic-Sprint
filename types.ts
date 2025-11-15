@@ -74,10 +74,18 @@ export interface Class {
   studentIds: string[];
 }
 
+export interface Prompts {
+    studentAnalysis: string;
+    classAnalysis: string;
+    schoolAnalysis: string;
+}
+
+
 export interface AppDatabase {
   users: User[];
   classes: Class[];
   studentProfiles: Record<string, StudentData>; // Keyed by studentId
   levelParamsInt: number[][];
   levelParamsFrac: number[][];
+  prompts: Prompts;
 }

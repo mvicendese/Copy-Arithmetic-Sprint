@@ -1,5 +1,61 @@
-import { AppDatabase, User, Class, StudentUser, StudentData, TestAttempt } from '../types';
-import { DEFAULT_LEVEL_PARAMS_INT, DEFAULT_LEVEL_PARAMS_FRAC } from '../constants';
+import { AppDatabase, User, Class, StudentUser, StudentData, TestAttempt, Prompts, AnsweredQuestion } from '../types';
+import { DEFAULT_LEVEL_PARAMS_INT, DEFAULT_LEVEL_PARAMS_FRAC, TOTAL_QUESTIONS } from '../constants';
+
+// --- INITIAL PROMPTS ---
+const INITIAL_PROMPTS: Prompts = {
+    studentAnalysis: `
+    You are an expert data analyst and math tutor. You will be given the complete test history for a student in an arithmetic practice app. Your task is to provide a detailed, insightful, and actionable summary for a teacher.
+
+    The data is structured as a series of tests. For each test, you'll see a list of every question answered, the student's answer, whether it was correct, the time taken, the operation type (add, sub, mul, div), and the specific numbers (operands) used in the question.
+
+    Based on the ENTIRE history, provide a deep analysis covering the following points. Use markdown for clear formatting.
+
+    1.  **Overall Summary:**
+        *   A brief, high-level overview of the student's progress, strengths, and primary areas for improvement.
+
+    2.  **Analysis by Operation:**
+        *   **Addition & Subtraction:**
+            *   How accurate are they with these operations?
+            *   Do they struggle with negative numbers?
+            *   **CRITICAL:** Analyze their performance with numbers near a multiple of 10 (e.g., adding 9, 19, 21; subtracting 8, 18). Do they make common mistakes here? Suggest teaching strategies like "add 10 and subtract 1" if you see this pattern.
+        *   **Multiplication & Division:**
+            *   How accurate are they?
+            *   **CRITICAL:** Identify specific times tables that are causing problems. Look at the operands from incorrect multiplication/division questions. For example, if they consistently miss questions involving 7s or 8s, point this out directly (e.g., "The student needs to practice their 7 and 8 times tables.").
+
+    3.  **Analysis by Number Size:**
+        *   Does the student's accuracy decrease as the numbers get larger (e.g., double-digit vs. single-digit)?
+        *   Are there specific ranges of numbers (e.g., teens) that are problematic?
+
+    4.  **Speed vs. Accuracy:**
+        *   Identify which types of questions they answer fastest and slowest.
+        *   Is there a negative correlation? Are they rushing and making careless errors on simpler problems? Or are they slow but accurate? Provide specific examples.
+
+    Synthesize these points into a comprehensive report for the teacher. Be specific, use examples from the data, and provide concrete, actionable recommendations.
+  `,
+    classAnalysis: `
+    You are an expert educational analyst. You are given data on students' recent incorrect answers in an arithmetic test. Your task is to identify common weaknesses and group students to help a teacher form small support groups.
+
+    Based on the provided data:
+    1.  **Identify Common Weakness Themes:** Look for recurring error patterns across multiple students. Examples could be: specific times tables (e.g., errors in questions involving 7s, 8s), operations with negative numbers, subtraction that requires borrowing, or specific fraction operations.
+    2.  **Group Students:** List the identified themes as clear, bolded markdown headers (e.g., **Difficulty with Negative Numbers**). Under each header, list the names of the students who exhibit that weakness. A student can appear in multiple groups.
+    3.  **Provide Actionable Advice:** For each group, give a brief, concrete suggestion for a small group activity or focus area.
+    4.  **Acknowledge Strong Students:** If any students have no recent errors, list them under a "Confident Students" group who may not need immediate intervention.
+
+    Your output should be well-formatted using markdown.
+  `,
+    schoolAnalysis: `
+    You are an expert data analyst for a school administrator. You are given a list of all students in the school and their current math level in an adaptive arithmetic program. Your task is to provide a high-level executive summary of the school's overall performance.
+
+    Based on the provided list of student levels:
+    1.  **Overall Distribution:** Briefly describe the distribution of students across the levels. Are most students at the beginner (1-5), intermediate (6-12), or advanced (13+) levels?
+    2.  **Identify At-Risk Cohorts:** Identify any significant groups of students who are clustered at lower levels. This could indicate a school-wide or grade-wide gap in foundational knowledge. Mention the level ranges where students seem to be "stuck".
+    3.  **Identify High-Achievers:** Acknowledge the group of students who are progressing to the highest levels, as they may need further enrichment.
+    4.  **Actionable Recommendations:** Suggest broad, school-level interventions. For example: "A significant number of students are struggling with levels 4-6, which focus on negative numbers. Consider organizing cross-class workshops on this topic." or "The students at the highest levels could be challenged with a math club or advanced projects."
+
+    Be concise, use markdown for formatting, and focus on the big picture to help the administrator allocate resources effectively.
+  `
+};
+
 
 // --- IN-MEMORY DATABASE ---
 const db: AppDatabase = {
@@ -8,76 +64,149 @@ const db: AppDatabase = {
   studentProfiles: {},
   levelParamsInt: DEFAULT_LEVEL_PARAMS_INT,
   levelParamsFrac: DEFAULT_LEVEL_PARAMS_FRAC,
+  prompts: INITIAL_PROMPTS,
 };
 
 // --- DATA SEEDING ---
+const getRandomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+// Simulates a single test attempt for a student to generate history
+const simulateTestAttempt = (level: number, performance: 'high' | 'medium' | 'low'): TestAttempt => {
+    let correctCount = 0;
+    switch (performance) {
+        case 'high':
+            correctCount = getRandomInt(23, 25); // Excellent performance
+            break;
+        case 'medium':
+            correctCount = getRandomInt(19, 23); // Good enough to progress
+            break;
+        case 'low':
+            correctCount = getRandomInt(10, 18); // Will not progress
+            break;
+    }
+    
+    // Generate some dummy answered questions, especially incorrect ones for the AI to analyze.
+    const answeredQuestions: AnsweredQuestion[] = [];
+    for(let i = 0; i < TOTAL_QUESTIONS; i++) {
+        const isCorrect = i < correctCount;
+        answeredQuestions.push({
+            questionText: `Q${i+1}`,
+            submittedAnswer: isCorrect ? 'correct' : 'incorrect',
+            isCorrect: isCorrect,
+            timeTakenSeconds: getRandomInt(5, 15),
+            operationType: ['add', 'sub', 'mul', 'div'][getRandomInt(0,3)] as 'add' | 'sub' | 'mul' | 'div',
+            operands: [getRandomInt(1, 20), getRandomInt(1,20)],
+        })
+    }
+
+    return {
+        date: new Date().toISOString(),
+        level,
+        correctCount,
+        timeRemaining: getRandomInt(0, 180),
+        totalScore: (level - 1) * TOTAL_QUESTIONS + correctCount,
+        answeredQuestions
+    };
+};
+
 const seedDatabase = () => {
     // Clear existing data
     db.users = [];
     db.classes = [];
     db.studentProfiles = {};
+    db.prompts = INITIAL_PROMPTS;
 
-    // Add the admin back
     db.users.push({ id: 'admin-1', role: 'admin', firstName: 'Admin', surname: 'User', email: 'admin@sprint.com', password: 'admin' });
 
     const teacherChars = ['A', 'B', 'C'];
     const classChars = ['a', 'b', 'c'];
 
+    const studentRegistry: string[] = [];
+
     teacherChars.forEach(teacherChar => {
-        // Create Teacher
         const teacherId = `teacher-${teacherChar}`;
-        const teacher = {
-            id: teacherId,
-            role: 'teacher' as const,
-            firstName: `Teach${teacherChar}`,
-            surname: 'User',
-            email: `teach${teacherChar}@sprint.com`,
-            password: 'password'
-        };
-        db.users.push(teacher);
+        db.users.push({
+            id: teacherId, role: 'teacher', firstName: `Teach${teacherChar}`, surname: 'User',
+            email: `teach${teacherChar}@sprint.com`, password: 'password'
+        });
 
         classChars.forEach(classChar => {
-            // Create Class
             const classId = `class-${teacherChar}${classChar}`;
-            const newClass = {
-                id: classId,
-                name: `Class ${teacherChar}${classChar}`,
-                teacherIds: [teacherId],
-                studentIds: [] as string[]
-            };
+            const newClass = { id: classId, name: `Class ${teacherChar}${classChar}`, teacherIds: [teacherId], studentIds: [] as string[] };
 
-            // Create 15 Students for this class
             for (let i = 1; i <= 15; i++) {
                 const studentId = `student-${teacherChar}${classChar}${i}`;
                 const student = {
-                    id: studentId,
-                    role: 'student' as const,
-                    firstName: `Student`,
-                    surname: `${teacherChar}${classChar}${i}`,
-                    password: 'password',
-                    locked: false
+                    id: studentId, role: 'student' as const, firstName: `Student`, surname: `${teacherChar}${classChar}${i}`,
+                    password: 'password', locked: false
                 };
                 db.users.push(student);
                 newClass.studentIds.push(studentId);
-
-                // Create a student profile with some varied data
-                db.studentProfiles[studentId] = {
-                    currentLevel: Math.floor(Math.random() * 5) + 1, // Level 1 to 5
-                    history: [], // Keep history empty to avoid excessive memory use
-                    consecutiveFastTrackCount: 0
-                };
+                studentRegistry.push(studentId);
             }
             db.classes.push(newClass);
         });
     });
+
+    // Generate history for all students
+    const highPerformers = [studentRegistry[0], studentRegistry[1]]; // First two students
+    const lowPerformers = studentRegistry.slice(-3); // Last three students
+
+    studentRegistry.forEach(studentId => {
+        let performance: 'high' | 'medium' | 'low' = 'medium';
+        if (highPerformers.includes(studentId)) performance = 'high';
+        if (lowPerformers.includes(studentId)) performance = 'low';
+
+        let currentLevel = 1;
+        let consecutiveFastTrackCount = 0;
+        const history: TestAttempt[] = [];
+        const numTests = getRandomInt(10, 20);
+
+        for (let i = 0; i < numTests; i++) {
+            const attempt = simulateTestAttempt(currentLevel, performance);
+            history.push(attempt);
+
+            // Calculate next level based on performance
+            let newLevel = currentLevel;
+            if (attempt.correctCount > 22) {
+                if (attempt.timeRemaining > 60) newLevel += 2;
+                else if (attempt.timeRemaining > 20) newLevel += 1;
+                consecutiveFastTrackCount = 0;
+            } else if (attempt.correctCount >= 20 && attempt.timeRemaining < 20) {
+                consecutiveFastTrackCount += 1;
+                if (consecutiveFastTrackCount >= 3) {
+                    newLevel += 1;
+                    consecutiveFastTrackCount = 0;
+                }
+            } else {
+                consecutiveFastTrackCount = 0;
+            }
+            currentLevel = Math.min(Math.max(newLevel, 1), 20);
+        }
+
+        db.studentProfiles[studentId] = {
+            currentLevel,
+            history,
+            consecutiveFastTrackCount
+        };
+    });
 };
 
-// Initialize DB with seeded data
 seedDatabase();
 
 
-// --- Helper to simulate API call latency ---
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+// --- PROMPT MANAGEMENT API ---
+export const getPrompts = async (): Promise<Prompts> => {
+    await delay(50);
+    return JSON.parse(JSON.stringify(db.prompts));
+}
+
+export const updatePrompts = async (newPrompts: Prompts): Promise<void> => {
+    await delay(200);
+    db.prompts = { ...newPrompts };
+}
 
 
 // --- AUTHENTICATION API ---
@@ -90,7 +219,7 @@ export const login = async (usernameOrEmail: string, password: string): Promise<
       return u.email.toLowerCase() === trimmedUsernameOrEmail;
     }
     if (u.role === 'student') {
-      const studentUsername = `${u.firstName.toLowerCase()}.${u.surname.toLowerCase()}`;
+      const studentUsername = `student.${u.surname.toLowerCase()}`;
       const normalizedInput = trimmedUsernameOrEmail.replace(/\s/g, '.');
       return studentUsername === normalizedInput;
     }
@@ -101,7 +230,7 @@ export const login = async (usernameOrEmail: string, password: string): Promise<
     sessionStorage.setItem('currentUser', JSON.stringify(user));
     return { user };
   }
-  return { user: null, error: 'Invalid credentials. For students, username is firstname.lastname (e.g., student.aa1)' };
+  return { user: null, error: 'Invalid credentials. For students, username is student.<surname> (e.g., student.aa1)' };
 };
 
 export const logout = (): void => {
@@ -149,7 +278,6 @@ export const updateUser = async (userId: string, updates: Partial<StudentUser>):
   const userIndex = db.users.findIndex(u => u.id === userId);
   if (userIndex === -1) throw new Error("User not found");
   
-  // Fix: Ensure we only update student users and help TypeScript infer the correct type.
   const userToUpdate = db.users[userIndex];
   if (userToUpdate.role !== 'student') {
     throw new Error('This function can only be used to update student users.');
@@ -221,7 +349,6 @@ export const getStudentProfile = async (studentId: string): Promise<StudentData>
   if (db.studentProfiles[studentId]) {
     return JSON.parse(JSON.stringify(db.studentProfiles[studentId]));
   }
-  // If profile doesn't exist for some reason, create a default one
   const defaultProfile: StudentData = {
     currentLevel: 1,
     history: [],

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { TOTAL_QUESTIONS, TEST_DURATION_SECONDS, DEFAULT_LEVEL_PARAMS_INT, DEFAULT_LEVEL_PARAMS_FRAC } from './constants';
-import { Question, StudentData, TestAttempt, RationalNumber, AnsweredQuestion, User, AdminUser, TeacherUser, StudentUser, Class, Role } from './types';
+import { Question, StudentData, TestAttempt, RationalNumber, AnsweredQuestion, User, AdminUser, TeacherUser, StudentUser, Class, Role, Prompts } from './types';
 import { generateTestQuestions } from './services/questionService';
 import { analyzeStudentHistory, analyzeClassForGroupings, analyzeSchoolTrends } from './services/geminiService';
-import * as api from './services/mockService'; // Use the new mock service
+import * as api from './services/mockService'; // Reverted to mock service
 import NumberPad from './components/NumberPad';
 
 declare const MathJax: any;
@@ -136,7 +136,7 @@ const AppHeader: React.FC<{ user: User, onLogout: () => void }> = ({ user, onLog
 
 // --- Admin View ---
 const AdminView: React.FC = () => {
-    const [view, setView] = useState<'classes' | 'summary' | 'params' | 'users' >('classes');
+    const [view, setView] = useState<'classes' | 'summary' | 'params' | 'users' | 'prompts'>('classes');
     const [allClasses, setAllClasses] = useState<Class[]>([]);
     const [selectedClass, setSelectedClass] = useState<Class | null>(null);
     const [isLoadingClasses, setIsLoadingClasses] = useState(true);
@@ -144,10 +144,21 @@ const AdminView: React.FC = () => {
     useEffect(() => {
         if (view === 'classes' && !selectedClass) {
             setIsLoadingClasses(true);
-            api.getAllClasses()
+            if ('getAllClasses' in api && typeof api.getAllClasses === 'function') {
+                api.getAllClasses()
+                    .then(setAllClasses)
+                    .catch(e => console.error(e))
+                    .finally(() => setIsLoadingClasses(false));
+            } else { 
+                 api.getUsers().then(users => { 
+                    return Promise.all(
+                        users.filter(u => u.role ==='teacher').map(t => api.getClassesForTeacher(t.id))
+                    ).then(classArrays => classArrays.flat());
+                })
                 .then(setAllClasses)
                 .catch(e => console.error(e))
                 .finally(() => setIsLoadingClasses(false));
+            }
         }
     }, [view, selectedClass]);
 
@@ -155,14 +166,18 @@ const AdminView: React.FC = () => {
         return <ClassDetailView aClass={selectedClass} onBack={() => setSelectedClass(null)} />;
     }
 
+    const navButtonClass = (buttonView: typeof view) => 
+        `px-4 py-2 mr-2 rounded-t-lg transition-colors ${view === buttonView ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600'}`;
+
     return (
         <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-lg">
             <h2 className="text-3xl font-bold mb-4">Admin Dashboard</h2>
             <nav className="mb-6 border-b border-slate-300 dark:border-slate-600">
-                <button onClick={() => setView('classes')} className={`px-4 py-2 mr-2 rounded-t-lg ${view === 'classes' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>All Classes</button>
-                <button onClick={() => setView('summary')} className={`px-4 py-2 mr-2 rounded-t-lg ${view === 'summary' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>School Summary</button>
-                <button onClick={() => setView('users')} className={`px-4 py-2 mr-2 rounded-t-lg ${view === 'users' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>User Management</button>
-                <button onClick={() => setView('params')} className={`px-4 py-2 rounded-t-lg ${view === 'params' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>Level Parameters</button>
+                <button onClick={() => setView('classes')} className={navButtonClass('classes')}>All Classes</button>
+                <button onClick={() => setView('summary')} className={navButtonClass('summary')}>School Summary</button>
+                <button onClick={() => setView('users')} className={navButtonClass('users')}>User Management</button>
+                <button onClick={() => setView('params')} className={navButtonClass('params')}>Level Parameters</button>
+                <button onClick={() => setView('prompts')} className={navButtonClass('prompts')}>Prompt Management</button>
             </nav>
             {view === 'classes' && (
                 isLoadingClasses ? <p>Loading classes...</p> :
@@ -178,9 +193,93 @@ const AdminView: React.FC = () => {
             {view === 'summary' && <SchoolSummaryView />}
             {view === 'params' && <LevelParametersEditor />}
             {view === 'users' && <UserManagement />}
+            {view === 'prompts' && <PromptManagement />}
         </div>
     );
 };
+
+const PromptManagement: React.FC = () => {
+    const [prompts, setPrompts] = useState<Prompts | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+    useEffect(() => {
+        setIsLoading(true);
+        api.getPrompts()
+            .then(setPrompts)
+            .catch(console.error)
+            .finally(() => setIsLoading(false));
+    }, []);
+
+    const handleSave = async () => {
+        if (!prompts) return;
+        setIsSaving(true);
+        setSaveStatus('idle');
+        try {
+            await api.updatePrompts(prompts);
+            setSaveStatus('success');
+        } catch (e) {
+            console.error(e);
+            setSaveStatus('error');
+        } finally {
+            setIsSaving(false);
+            setTimeout(() => setSaveStatus('idle'), 3000); // Reset status message after 3s
+        }
+    };
+    
+    if (isLoading) return <p>Loading prompts...</p>;
+    if (!prompts) return <p>Could not load prompts.</p>;
+
+    const handlePromptChange = (key: keyof Prompts, value: string) => {
+        setPrompts(p => p ? { ...p, [key]: value } : null);
+    };
+
+    return (
+        <div className="space-y-6">
+            <h3 className="text-xl font-semibold">AI Prompt Management</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+                Here you can customize the prompts sent to the Gemini API. This allows you to control the focus, tone, and length of the AI-generated analyses.
+            </p>
+            
+            <div className="space-y-4">
+                <div>
+                    <label className="block font-semibold mb-1">Individual Student Analysis Prompt</label>
+                    <textarea 
+                        value={prompts.studentAnalysis}
+                        onChange={(e) => handlePromptChange('studentAnalysis', e.target.value)}
+                        className="w-full h-48 p-2 rounded bg-slate-200 dark:bg-slate-700 font-mono text-sm"
+                    />
+                </div>
+                 <div>
+                    <label className="block font-semibold mb-1">Class Grouping Analysis Prompt</label>
+                    <textarea 
+                        value={prompts.classAnalysis}
+                        onChange={(e) => handlePromptChange('classAnalysis', e.target.value)}
+                        className="w-full h-48 p-2 rounded bg-slate-200 dark:bg-slate-700 font-mono text-sm"
+                    />
+                </div>
+                 <div>
+                    <label className="block font-semibold mb-1">School-wide Executive Summary Prompt</label>
+                    <textarea 
+                        value={prompts.schoolAnalysis}
+                        onChange={(e) => handlePromptChange('schoolAnalysis', e.target.value)}
+                        className="w-full h-48 p-2 rounded bg-slate-200 dark:bg-slate-700 font-mono text-sm"
+                    />
+                </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+                <button onClick={handleSave} disabled={isSaving} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg disabled:bg-blue-400">
+                    {isSaving ? 'Saving...' : 'Save All Prompts'}
+                </button>
+                {saveStatus === 'success' && <p className="text-green-500">Prompts saved successfully!</p>}
+                {saveStatus === 'error' && <p className="text-red-500">Failed to save prompts.</p>}
+            </div>
+        </div>
+    );
+};
+
 
 const SchoolSummaryView: React.FC = () => {
     const [summary, setSummary] = useState('');
@@ -191,12 +290,15 @@ const SchoolSummaryView: React.FC = () => {
         setSummary('');
         try {
             const users = await api.getUsers();
-            const profiles = await api.getAllStudentProfiles();
-            const studentUsers = users.filter(u => u.role === 'student');
             
-            const allStudentsData = studentUsers.map(s => ({
+            const studentUsers = users.filter(u => u.role === 'student');
+
+            const profilePromises = studentUsers.map(s => api.getStudentProfile(s.id));
+            const profiles = await Promise.all(profilePromises);
+            
+            const allStudentsData = studentUsers.map((s, i) => ({
                 studentName: `${s.firstName} ${s.surname}`,
-                data: profiles[s.id]
+                data: profiles[i]
             })).filter(s => s.data);
 
             const result = await analyzeSchoolTrends(allStudentsData);
@@ -224,14 +326,15 @@ const SchoolSummaryView: React.FC = () => {
 
 
 const UserManagement: React.FC = () => {
-    const [users, setUsers] = useState<User[]>([]);
+    const [allUsers, setAllUsers] = useState<User[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [formState, setFormState] = useState({ firstName: '', surname: '', email: '', password: '', role: 'teacher' as Role });
+    const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
         setIsLoading(true);
         api.getUsers()
-            .then(setUsers)
+            .then(setAllUsers)
             .catch(error => console.error("Failed to fetch users:", error))
             .finally(() => setIsLoading(false));
     }, []);
@@ -240,9 +343,6 @@ const UserManagement: React.FC = () => {
       e.preventDefault();
       const { role, firstName, surname, email, password } = formState;
       
-      // FIX: The type `Omit<User, 'id'>` is too general and causes issues with TypeScript's
-      // excess property checking on object literals. Using a more specific union type
-      // that only includes the user types that can be created here resolves the errors.
       let userData: Omit<StudentUser, 'id'> | Omit<TeacherUser, 'id'>;
       if (role === 'student') {
         userData = { role: 'student', firstName, surname, password, locked: false };
@@ -252,13 +352,17 @@ const UserManagement: React.FC = () => {
 
       try {
         const newUser = await api.createUser(userData);
-        setUsers(prev => [...prev, newUser]);
-        setFormState({ firstName: '', surname: '', email: '', password: '', role: 'teacher' as Role }); // Reset form
+        setAllUsers(prev => [...prev, newUser]);
+        setFormState({ firstName: '', surname: '', email: '', password: '', role: 'teacher' as Role });
       } catch (error) {
         console.error("Failed to create user:", error);
-        // Optionally, show an error message to the user
       }
     }
+    
+    const teachers = allUsers.filter(u => u.role === 'teacher');
+    const studentSearchResults = searchTerm 
+        ? allUsers.filter(u => u.role === 'student' && `${u.firstName} ${u.surname}`.toLowerCase().includes(searchTerm.toLowerCase()))
+        : [];
     
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -277,14 +381,30 @@ const UserManagement: React.FC = () => {
                 </form>
             </div>
             <div>
-                <h3 className="text-xl font-semibold mb-2">Existing Users</h3>
-                <div className="max-h-80 overflow-y-auto p-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
-                    {isLoading ? <p>Loading...</p> : users.map(user => (
+                <h3 className="text-xl font-semibold mb-2">Existing Teachers</h3>
+                <div className="max-h-40 overflow-y-auto p-2 bg-slate-100 dark:bg-slate-700 rounded-lg mb-4">
+                    {isLoading ? <p>Loading...</p> : teachers.map(user => (
                         <div key={user.id} className="p-2 border-b border-slate-300 dark:border-slate-600">
-                            <p className="font-semibold">{user.firstName} {user.surname} <span className="text-xs capitalize font-normal text-slate-500">({user.role})</span></p>
+                            <p className="font-semibold">{user.firstName} {user.surname}</p>
                             {'email' in user && <p className="text-sm text-slate-600 dark:text-slate-400">{user.email}</p>}
                         </div>
                     ))}
+                </div>
+                <h3 className="text-xl font-semibold mb-2">Search Students</h3>
+                 <input 
+                    type="text" 
+                    placeholder="Type to search for a student..." 
+                    value={searchTerm} 
+                    onChange={e => setSearchTerm(e.target.value)}
+                    className="w-full p-2 rounded bg-slate-200 dark:bg-slate-700 mb-2"
+                 />
+                <div className="max-h-40 overflow-y-auto p-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                   {studentSearchResults.map(user => (
+                       <div key={user.id} className="p-2 border-b border-slate-300 dark:border-slate-600">
+                           <p className="font-semibold">{user.firstName} {user.surname}</p>
+                       </div>
+                   ))}
+                   {searchTerm && studentSearchResults.length === 0 && <p className="text-slate-500">No students found.</p>}
                 </div>
             </div>
         </div>

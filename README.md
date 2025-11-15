@@ -1,6 +1,6 @@
 # Arithmetic Sprint
 
-This is an adaptive, timed arithmetic test for students. This version of the application runs entirely in your browser and uses an in-memory database, making it easy to run and test without any backend setup.
+This is an adaptive, timed arithmetic test for students. This is a fully client-side demo application using an in-memory database.
 
 ## Features
 
@@ -8,7 +8,7 @@ This is an adaptive, timed arithmetic test for students. This version of the app
 -   **Multi-User System:** Separate views for Admins, Teachers, and Students.
 -   **Class Management:** Teachers can create classes and manage students.
 -   **AI-Powered Feedback:** Uses the Gemini API to analyze student performance and provide actionable insights for teachers and students.
--   **Local-First:** All data is stored in-memory. The data will reset when you close the browser tab.
+-   **In-Memory Database:** All data is reset when the application is reloaded.
 
 ---
 
